@@ -928,7 +928,11 @@ typedef struct th_schema {
     size_t rng_checked_cap, rng_checked_len;
     nspair rng_disjoint[8]; /* compile-time 7.4 check: the last disjoint pairs, round robin */
     size_t rng_disjoint_len, rng_disjoint_next;
-    struct patintern *intern;    /* per-validation pattern hash-consing table; NULL while compiling */
+    struct patintern *intern;        /* per-validation pattern hash-consing table; NULL while compiling */
+    struct rng_seq_table *seq_table; /* sequence bases the compile built; read-only once validation starts */
+    struct rng_seq_table *seq_local; /* sequence bases one validation built, hash-consed with seq_table */
+    struct cover_memo *covers;       /* per-event covers results of one validation; NULL until a check walks */
+    size_t covers_event;             /* the event the covers memo's current entries belong to */
     struct rng_routing *routing; /* per-validation operand index of the container joins; NULL until events grow large */
     int route_count;             /* container joins built, compiled and then lazily built ones */
     struct patmemo *memo;        /* the memo in use: event_memo, or token_memo inside a <list>; NULL while compiling */
@@ -966,6 +970,9 @@ typedef struct th_schema {
     /* XSD position sets of one validate() call that no matcher holds, and the length they were made for */
     struct posset_spare *posset_spares;
     Py_ssize_t posset_size;
+    /* the xs:any particle that consumed each child of the complex element a validate() call matches */
+    th_node **wild_claims;
+    size_t wild_claim_cap;
     /* XSD name lookup list of one validate() call, refilled for each element, and the index over it that an element
        with many attributes builds */
     struct edecl *edecl_items;

@@ -807,7 +807,7 @@ TH_NODE_API(static, PyObject *, node_get_source_location, (PyObject * self, void
     for (Py_ssize_t index = 0; index < loc->attr_count; index++) {
         Py_ssize_t name_len;
         const char *bytes = th_attr_name(tree, loc->attrs[index].name_atom, &name_len);
-        PyObject *name = PyUnicode_DecodeUTF8(bytes, name_len, "strict");
+        PyObject *name = PyUnicode_DecodeUTF8(bytes, name_len, "surrogatepass");
         if (name == NULL) {       /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
             Py_DECREF(start_tag); /* GCOVR_EXCL_LINE: allocation-failure path */
             Py_DECREF(end_tag);   /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -2124,7 +2124,9 @@ PyDoc_STRVAR(encode_doc,
              "    output funds.\n"
              ":raises LookupError: if encoding names a codec Python does not know.\n"
              ":raises ValueError: if meta_charset would declare the codec and no WHATWG encoding label names it,\n"
-             "    such as an ISO-2022 variant other than ISO-2022-JP, or UTF-16.\n"
+             "    such as an ISO-2022 variant other than ISO-2022-JP, or UTF-16, or when the output would not read\n"
+             "    back as written under the declared label, such as Latin-1 text holding U+0080 or U+0085, which\n"
+             "    windows-1252 reads as other characters.\n"
              ":raises UnicodeEncodeError: if the markup has characters the encoding cannot\n"
              "    represent. Under an ISO-2022 codec those include U+000E, U+000F and U+001B,\n"
              "    which would reach the output as the shift codes that switch a decoder's state.");
@@ -2362,10 +2364,13 @@ static int resolve_layout(module_state *state, PyObject *layout_obj, enum th_lay
    so a tree with no head and no charset meta is not refused. It is borrowed only
    for the duration of the call. */
 static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyObject *layout_obj, int sort_attributes,
-                                    int meta_charset, int xml, const char *encoding, int inner) {
+                                    int meta_charset, int xml, const char *encoding, int inner,
+                                    const char **declared_label) {
     const char *charset = "utf-8";
     int unlabelled = 0;
     int *charset_missing = NULL;
+    int declared = 0;
+    int *charset_written = NULL;
     if (meta_charset && encoding != NULL) {
         const char *label = meta_charset_label(encoding);
         if (label == NULL && PyErr_Occurred()) {
@@ -2375,6 +2380,7 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
             charset_missing = &unlabelled;
         } else {
             charset = label;
+            charset_written = strcmp(label, "utf-8") == 0 ? NULL : &declared;
         }
     }
     th_serialize_opts opts = {0,
@@ -2391,7 +2397,8 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
                               NULL,
                               NULL,
                               NULL,
-                              0};
+                              0,
+                              charset_written};
     if (resolve_formatter(state_of(self), formatter_obj, &opts.formatter) < 0) {
         return NULL;
     }
@@ -2429,6 +2436,9 @@ static PyObject *node_serialize_str(PyObject *self, PyObject *formatter_obj, PyO
     }
     PyObject *result = ucs4_to_str(data, out_len);
     PyMem_Free(data);
+    if (declared) {
+        *declared_label = charset;
+    }
     return result;
 }
 
@@ -2440,6 +2450,253 @@ static const th_noscript_span *first_unstable(const th_noscript_track *track) {
         }
     }
     return NULL;
+}
+
+/* A start tag of one of these kinds closes an open element of the family it names, when no scope boundary sits between
+   them, so the reparse of a minified tree that nests one inside the other builds a different tree. The tree builder
+   reaches such nesting only through foster parenting or quirks-mode tables. Each node carries one bit per family for
+   opening it, closing an open element of the family and bounding the search for one, so the walk does a few bit
+   operations per node. */
+enum renest_family {
+    RENEST_P,
+    RENEST_LI,
+    RENEST_DEF,
+    RENEST_HEADING,
+    RENEST_A,
+    RENEST_NOBR,
+    RENEST_BUTTON,
+    RENEST_OPTION,
+    RENEST_OPTGROUP,
+    RENEST_SELECT,
+    RENEST_FAMILIES,
+};
+
+#define RENEST_ALL ((1u << RENEST_FAMILIES) - 1)
+#define RENEST_OPENS(family) (1u << (family))
+#define RENEST_CLOSES(family) (1u << (RENEST_FAMILIES + (family)))
+#define RENEST_BOUNDS(family) (1u << (2 * RENEST_FAMILIES + (family)))
+#define RENEST_BOUNDS_SCOPE                                                                                            \
+    ((RENEST_ALL & ~(RENEST_OPENS(RENEST_A) | RENEST_OPENS(RENEST_NOBR) | RENEST_OPENS(RENEST_SELECT)))                \
+     << (2 * RENEST_FAMILIES))
+
+static int renest_is_heading(uint16_t atom) {
+    return atom == TH_TAG_H1 || atom == TH_TAG_H2 || atom == TH_TAG_H3 || atom == TH_TAG_H4 || atom == TH_TAG_H5 ||
+           atom == TH_TAG_H6;
+}
+
+/* The start tags that close an open p in button scope (the in-body rules and the list and definition starts). */
+static int renest_is_p_closer(uint16_t atom) {
+    switch (atom) {
+    case TH_TAG_ADDRESS:
+    case TH_TAG_ARTICLE:
+    case TH_TAG_ASIDE:
+    case TH_TAG_BLOCKQUOTE:
+    case TH_TAG_CENTER:
+    case TH_TAG_DETAILS:
+    case TH_TAG_DIALOG:
+    case TH_TAG_DIR:
+    case TH_TAG_DIV:
+    case TH_TAG_DL:
+    case TH_TAG_FIELDSET:
+    case TH_TAG_FIGCAPTION:
+    case TH_TAG_FIGURE:
+    case TH_TAG_FOOTER:
+    case TH_TAG_FORM:
+    case TH_TAG_HEADER:
+    case TH_TAG_HGROUP:
+    case TH_TAG_HR:
+    case TH_TAG_LI:
+    case TH_TAG_LISTING:
+    case TH_TAG_MAIN:
+    case TH_TAG_MENU:
+    case TH_TAG_NAV:
+    case TH_TAG_OL:
+    case TH_TAG_P:
+    case TH_TAG_PLAINTEXT:
+    case TH_TAG_PRE:
+    case TH_TAG_SEARCH:
+    case TH_TAG_SECTION:
+    case TH_TAG_SUMMARY:
+    case TH_TAG_UL:
+    case TH_TAG_XMP:
+    case TH_TAG_DD:
+    case TH_TAG_DT:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* The family bits of one node: what it opens, what it closes and what it bounds. */
+static unsigned renest_flags(const th_node *node) {
+    unsigned flags = 0;
+    if (node->ns != TH_NS_HTML) {
+        if (node->atom == TH_TAG_FOREIGNOBJECT || node->atom == TH_TAG_DESC || node->atom == TH_TAG_TITLE ||
+            node->atom == TH_TAG_MI || node->atom == TH_TAG_MO || node->atom == TH_TAG_MN || node->atom == TH_TAG_MS ||
+            node->atom == TH_TAG_MTEXT || node->atom == TH_TAG_ANNOTATION_XML) {
+            flags |= RENEST_BOUNDS_SCOPE;
+        }
+        return flags;
+    }
+    if (renest_is_p_closer(node->atom) || renest_is_heading(node->atom)) {
+        flags |= RENEST_CLOSES(RENEST_P);
+    }
+    switch (node->atom) {
+    case TH_TAG_P:
+        flags |= RENEST_OPENS(RENEST_P);
+        break;
+    case TH_TAG_LI:
+        flags |= RENEST_OPENS(RENEST_LI) | RENEST_CLOSES(RENEST_LI);
+        break;
+    case TH_TAG_DD:
+    case TH_TAG_DT:
+        flags |= RENEST_OPENS(RENEST_DEF) | RENEST_CLOSES(RENEST_DEF);
+        break;
+    case TH_TAG_H1:
+    case TH_TAG_H2:
+    case TH_TAG_H3:
+    case TH_TAG_H4:
+    case TH_TAG_H5:
+    case TH_TAG_H6:
+        flags |= RENEST_OPENS(RENEST_HEADING) | RENEST_CLOSES(RENEST_HEADING);
+        break;
+    case TH_TAG_A:
+        flags |= RENEST_OPENS(RENEST_A) | RENEST_CLOSES(RENEST_A);
+        break;
+    case TH_TAG_NOBR:
+        flags |= RENEST_OPENS(RENEST_NOBR) | RENEST_CLOSES(RENEST_NOBR);
+        break;
+    case TH_TAG_BUTTON:
+        flags |= RENEST_OPENS(RENEST_BUTTON) | RENEST_CLOSES(RENEST_BUTTON) | RENEST_BOUNDS(RENEST_P);
+        break;
+    case TH_TAG_OPTION:
+        flags |= RENEST_OPENS(RENEST_OPTION) | RENEST_CLOSES(RENEST_OPTION);
+        break;
+    case TH_TAG_OPTGROUP:
+        flags |= RENEST_OPENS(RENEST_OPTGROUP) | RENEST_CLOSES(RENEST_OPTGROUP) | RENEST_CLOSES(RENEST_OPTION);
+        break;
+    case TH_TAG_SELECT:
+        flags |= RENEST_OPENS(RENEST_SELECT) | RENEST_CLOSES(RENEST_SELECT);
+        break;
+    case TH_TAG_INPUT:
+    case TH_TAG_KEYGEN:
+    case TH_TAG_TEXTAREA:
+        flags |= RENEST_CLOSES(RENEST_SELECT);
+        break;
+    case TH_TAG_OL:
+    case TH_TAG_UL:
+        flags |= RENEST_BOUNDS(RENEST_LI);
+        break;
+    default:
+        break;
+    }
+    switch (node->atom) {
+    case TH_TAG_APPLET:
+    case TH_TAG_OBJECT:
+    case TH_TAG_MARQUEE:
+    case TH_TAG_TEMPLATE:
+    case TH_TAG_TD:
+    case TH_TAG_TH:
+    case TH_TAG_CAPTION:
+        flags |= RENEST_BOUNDS(RENEST_A) | RENEST_BOUNDS(RENEST_NOBR);
+        break;
+    default:
+        break;
+    }
+    if ((node->tag_flags & TH_TAG_SCOPING) != 0) {
+        flags |= RENEST_BOUNDS_SCOPE;
+    }
+    return flags;
+}
+
+/* Whether a subtree holds a start tag that would close an element above it, with no scope boundary in between. armed
+   holds the families with such an element open above node. */
+static int renest_subtree(const th_node *node, unsigned armed) {
+    unsigned flags = node->type == TH_NODE_ELEMENT ? renest_flags(node) : 0;
+    if (armed & (flags >> RENEST_FAMILIES) & RENEST_ALL) {
+        return 1;
+    }
+    unsigned below = (armed | (flags & RENEST_ALL)) & ~(flags >> (2 * RENEST_FAMILIES)) & RENEST_ALL;
+    for (const th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        if (renest_subtree(child, below)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether the tree holds a start tag that would close an element above it (see renest_subtree). */
+static int renest_in_tree(th_tree *tree) {
+    return renest_subtree(th_tree_document(tree), 0);
+}
+
+/* The element structure a tree builds, as open and close events in document order. Text is left out: minifying folds
+   whitespace, which changes text without changing what the markup builds, while a start tag that closes an element
+   above it changes the nesting. */
+#define RENEST_OPEN(ns, atom) ((UINT32_C(1) << 31) | ((uint32_t)(ns) << 16) | (uint32_t)(atom))
+#define RENEST_CLOSE UINT32_C(1) << 30
+
+typedef struct {
+    uint32_t *items;
+    Py_ssize_t count;
+    Py_ssize_t cap;
+} renest_events;
+
+static int renest_event_push(renest_events *events, uint32_t value) {
+    if (events->count == events->cap) {
+        Py_ssize_t cap = events->cap == 0 ? 64 : events->cap * 2;
+        uint32_t *grown = PyMem_Realloc(events->items, (size_t)cap * sizeof(uint32_t));
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        events->items = grown;
+        events->cap = cap;
+    }
+    events->items[events->count++] = value;
+    return 0;
+}
+
+static int renest_events_walk(const th_node *node, renest_events *events) {
+    for (const th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
+        if (child->type == TH_NODE_ELEMENT) {
+            if (renest_event_push(events, RENEST_OPEN(child->ns, child->atom)) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+                return -1; /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+        }
+        if (renest_events_walk(child, events) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+            return -1;                               /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        if (child->type == TH_NODE_ELEMENT) {
+            if (renest_event_push(events, RENEST_CLOSE) < 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+                return -1;                                     /* GCOVR_EXCL_LINE: allocation-failure path */
+            }
+        }
+    }
+    return 0;
+}
+
+/* Whether the markup, reparsed with scripting off as the tree was parsed, builds the element structure the tree has.
+   -1 when the reparse runs out of memory. */
+static int minified_keeps_structure(th_tree *tree, PyObject *markup) {
+    renest_events before = {NULL, 0, 0};
+    renest_events after = {NULL, 0, 0};
+    th_noscript_track track = {0};
+    th_tree *reparsed =
+        th_tree_parse_noscript(PyUnicode_KIND(markup), PyUnicode_DATA(markup), PyUnicode_GET_LENGTH(markup), &track);
+    if (reparsed == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;          /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int same = -1;
+    if (renest_events_walk(th_tree_document(tree), &before) == 0 &&    /* GCOVR_EXCL_BR_LINE: OOM */
+        renest_events_walk(th_tree_document(reparsed), &after) == 0) { /* GCOVR_EXCL_BR_LINE: OOM */
+        same = before.count == after.count &&
+               memcmp(before.items, after.items, (size_t)before.count * sizeof(uint32_t)) == 0;
+    }
+    th_tree_free(reparsed);
+    th_noscript_track_free(&track);
+    PyMem_Free(before.items);
+    PyMem_Free(after.items);
+    return same;
 }
 
 /* _minify_document(html, layout): parse html with scripting off and minify the document, copying each stable
@@ -2473,16 +2730,26 @@ PyObject *turbohtml_minify_document(PyObject *module, PyObject *args) {
     }
     const th_noscript_span *unstable = first_unstable(&track);
     PyObject *result;
-    if (unstable != NULL && !unstable->cut) {
+    /* a node the cap moved has no minified form that reparses to the same tree, so the markup comes back as written */
+    if ((unstable != NULL && !unstable->cut) || th_tree_depth_capped(tree)) {
         result = Py_NewRef(html);
     } else {
         th_minify_source source = {track.spans, track.count};
         minify_opts.source = track.count > 0 ? &source : NULL; /* with no noscript, the walk skips the source checks */
-        th_serialize_opts opts = {0, 0, 0, "utf-8", 5, 0, 0, NULL, 0, NULL, NULL, NULL, NULL, NULL, 0};
+        th_serialize_opts opts = {0, 0, 0, "utf-8", 5, 0, 0, NULL, 0, NULL, NULL, NULL, NULL, NULL, 0, NULL};
         Py_ssize_t out_len;
         Py_UCS4 *data = th_node_minify(tree, th_tree_document(tree), &minify_opts, &opts, &out_len);
         result = data == NULL ? PyErr_NoMemory() : ucs4_to_str(data, out_len); /* GCOVR_EXCL_BR_LINE: OOM */
         PyMem_Free(data);
+        if (result != NULL && renest_in_tree(tree)) { /* GCOVR_EXCL_BR_LINE: OOM leaves no result */
+            int kept = minified_keeps_structure(tree, result);
+            if (kept < 0) {                /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+                Py_CLEAR(result);          /* GCOVR_EXCL_LINE: allocation-failure path */
+                result = PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation-failure path */
+            } else if (!kept) {
+                Py_SETREF(result, Py_NewRef(html));
+            }
+        }
     }
     th_tree_free(tree);
     th_noscript_track_free(&track);
@@ -2509,7 +2776,8 @@ static int parse_html_spec(PyObject *spec, PyObject **formatter_obj, PyObject **
 /* Serialize self to a str under the Html config in spec (a borrowed dict of the
    config's non-default values, or NULL for the defaults), declaring encoding under
    meta_charset. */
-static PyObject *node_serialize_from_spec(PyObject *self, PyObject *spec, const char *encoding, int inner) {
+static PyObject *node_serialize_from_spec(PyObject *self, PyObject *spec, const char *encoding, int inner,
+                                          const char **declared_label) {
     PyObject *formatter_obj = NULL;
     PyObject *layout_obj = NULL;
     int sort_attributes = 0;
@@ -2518,20 +2786,22 @@ static PyObject *node_serialize_from_spec(PyObject *self, PyObject *spec, const 
     if (parse_html_spec(spec, &formatter_obj, &layout_obj, &sort_attributes, &meta_charset, &xml) < 0) {
         return NULL;
     }
-    return node_serialize_str(self, formatter_obj, layout_obj, sort_attributes, meta_charset, xml, encoding, inner);
+    return node_serialize_str(self, formatter_obj, layout_obj, sort_attributes, meta_charset, xml, encoding, inner,
+                              declared_label);
 }
 
 /* Resolve a serialize/encode call's options object to a str rendering, declaring encoding under meta_charset
    (NULL for the str output). None renders the defaults; otherwise the config's _unpack() supplies its keywords. */
-static PyObject *node_serialize_options(PyObject *self, PyObject *options, const char *encoding, int inner) {
+static PyObject *node_serialize_options(PyObject *self, PyObject *options, const char *encoding, int inner,
+                                        const char **declared_label) {
     if (options == NULL || options == Py_None) {
-        return node_serialize_str(self, NULL, NULL, 0, 0, 0, encoding, inner);
+        return node_serialize_str(self, NULL, NULL, 0, 0, 0, encoding, inner, declared_label);
     }
     PyObject *spec = config_unpack(options, state_of(self)->html_config_type, "Html");
     if (spec == NULL) {
         return NULL;
     }
-    PyObject *result = node_serialize_from_spec(self, spec, encoding, inner);
+    PyObject *result = node_serialize_from_spec(self, spec, encoding, inner, declared_label);
     Py_DECREF(spec);
     return result;
 }
@@ -2545,7 +2815,7 @@ TH_NODE_API(static, PyObject *, node_serialize, (PyObject * self, PyObject *args
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O$p", keywords, &options, &inner)) {
         return NULL;
     }
-    return node_serialize_options(self, options, NULL, inner);
+    return node_serialize_options(self, options, NULL, inner, NULL);
 }
 
 PyObject *codec_registry_name(const char *encoding) {
@@ -2566,18 +2836,31 @@ PyObject *codec_registry_name(const char *encoding) {
     return name;
 }
 
-/* Whether encoding resolves to one of CPython's ISO-2022 codecs (iso2022_jp and its variants, iso2022_kr): 1 or 0, or
-   -1 with the registry's LookupError set. */
-static int codec_is_iso2022(const char *encoding) {
-    PyObject *name = codec_registry_name(encoding);
-    if (name == NULL) {
-        return -1;
+/* Whether the codec writes U+000E, U+000F or U+001B as bytes that switch a decoder's state: 1 or 0, or -1 with an
+   exception set. Encoding Japanese, Hangul and Han text reaches the switch bytes of every ISO-2022 codec, whatever its
+   name, while hz and UTF-7 spell their switches as "~{" and "+" and write no raw shift byte. */
+static int codec_emits_shift_bytes(const char *encoding) {
+    static const Py_UCS4 probe_chars[] = {0x3042, 0xAC00, 0x4E2D};
+    PyObject *probe = PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, probe_chars, Py_ARRAY_LENGTH(probe_chars));
+    if (probe == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return -1;       /* GCOVR_EXCL_LINE: allocation-failure path */
     }
-    const char *resolved = PyUnicode_Check(name) ? PyUnicode_AsUTF8(name) : NULL;
-    int iso2022 = resolved != NULL && strncmp(resolved, "iso2022", 7) == 0;
-    PyErr_Clear(); /* a codec a search function registered without a str name is not one of CPython's */
-    Py_DECREF(name);
-    return iso2022;
+    PyObject *encoded = PyUnicode_AsEncodedString(probe, encoding, "replace");
+    Py_DECREF(probe);
+    if (encoded == NULL) {
+        if (PyErr_ExceptionMatches(PyExc_LookupError)) {
+            return -1;
+        }
+        PyErr_Clear(); /* a codec that refuses the sample text is not one that writes shift bytes for it */
+        return 0;
+    }
+    const char *bytes = PyBytes_AS_STRING(encoded);
+    int shifting = 0;
+    for (Py_ssize_t index = 0; index < PyBytes_GET_SIZE(encoded) && !shifting; index++) {
+        shifting = bytes[index] == 0x0E || bytes[index] == 0x0F || bytes[index] == 0x1B;
+    }
+    Py_DECREF(encoded);
+    return shifting;
 }
 
 /* The first U+000E, U+000F or U+001B in text, or -1: each sweep stops where the one before it matched. */
@@ -2594,25 +2877,21 @@ static Py_ssize_t shift_code_find(PyObject *text) {
     return first;
 }
 
-static int label_may_be_iso2022(const char *encoding) {
-    return strstr(encoding, "2022") != NULL;
-}
-
 /* CPython's ISO-2022 encoders write U+000E, U+000F and U+001B unchanged, and a decoder reads those bytes as shift
    codes that change how the bytes after them are read, so markup holding one would not read back as serialized. The
    WHATWG ISO-2022-JP encoder errors on all three for that reason
    (https://encoding.spec.whatwg.org/#iso-2022-jp-encoder), so under those codecs they are characters the encoding
    cannot represent: a strict encode raises UnicodeEncodeError, and charrefs writes them the way "xmlcharrefreplace"
-   writes every other such character. Only a label containing "2022" pays for the scan, because CPython gives every
-   ISO-2022 codec name and alias that substring. */
+   writes every other such character. The codec probe is a fixed cost per call, so the scan of the text runs only for
+   codecs that switch. */
 PyObject *markup_encode(PyObject *text, const char *encoding, int charrefs) {
     const char *errors = charrefs ? "xmlcharrefreplace" : NULL;
-    Py_ssize_t shift = label_may_be_iso2022(encoding) ? shift_code_find(text) : -1;
-    int iso2022 = shift < 0 ? 0 : codec_is_iso2022(encoding);
-    if (iso2022 < 0) {
+    int stateful = codec_emits_shift_bytes(encoding);
+    if (stateful < 0) {
         return NULL;
     }
-    if (!iso2022) {
+    Py_ssize_t shift = stateful ? shift_code_find(text) : -1;
+    if (shift < 0) {
         return PyUnicode_AsEncodedString(text, encoding, errors);
     }
     if (!charrefs) {
@@ -2644,11 +2923,28 @@ TH_NODE_API(static, PyObject *, node_encode, (PyObject * self, PyObject *args, P
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "|sO$p", keywords, &encoding, &options, &inner)) {
         return NULL;
     }
-    PyObject *text = node_serialize_options(self, options, encoding, inner);
+    const char *declared_label = NULL;
+    PyObject *text = node_serialize_options(self, options, encoding, inner, &declared_label);
     if (text == NULL) {
         return NULL;
     }
     PyObject *encoded = markup_encode(text, encoding, 0);
+    if (encoded != NULL && declared_label != NULL) {
+        int reads_back = declaration_reads_back(text, encoded, encoding, declared_label);
+        /* GCOVR_EXCL_START: the read-back fails only on allocation */
+        if (reads_back < 0) {
+            Py_DECREF(encoded);
+            encoded = NULL;
+        }
+        /* GCOVR_EXCL_STOP */
+        if (reads_back == 0) {
+            Py_DECREF(encoded);
+            encoded = NULL;
+            PyErr_Format(PyExc_ValueError,
+                         "meta_charset cannot declare %s for %s: the encoded output does not read back as written",
+                         declared_label, encoding);
+        }
+    }
     Py_DECREF(text);
     return encoded;
 }
@@ -2801,7 +3097,8 @@ static PyObject *node_make_serialize_iter(PyObject *self, PyObject *formatter_ob
                               NULL,
                               NULL,
                               NULL,
-                              0};
+                              0,
+                              NULL};
     if (resolve_formatter(state, formatter_obj, &opts.formatter) < 0) {
         return NULL;
     }

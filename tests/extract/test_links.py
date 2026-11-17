@@ -252,6 +252,19 @@ def test_language_filter_still_screens_the_urls_themselves() -> None:
     assert extract_links(html, _BASE, UrlCleaning(language="en")) == {"https://test.com/en/page"}
 
 
+@pytest.mark.parametrize(
+    "href",
+    [
+        pytest.param("https://%64e.test.com/page", id="percent-encoded-label"),
+        pytest.param("https://\uff44\uff45.test.com/page", id="fullwidth-label"),
+        pytest.param("https://de\uff0etest.com/page", id="fullwidth-separator"),
+    ],
+)
+def test_strict_language_filter_screens_the_canonical_host(href: str) -> None:
+    html = f'<a href="{href}">x</a>'
+    assert extract_links(html, _BASE, UrlCleaning(strict=True, language="en")) == set()
+
+
 def test_without_a_language_filter_hreflang_is_ignored() -> None:
     html = '<a href="https://test.com/example" hreflang="de-DE">x</a>'
     assert extract_links(html, _BASE) == {"https://test.com/example"}
@@ -852,12 +865,12 @@ def test_css_url_in_style_element_is_resolved() -> None:
         pytest.param('url("p\\\t")', 'url("https://example.com/dir/p")', id="escaped-tab"),
         pytest.param(
             'url("\\\\remote.test/x.png")',
-            'url("https://example.com/dir/\\\\remote.test/x.png")',
+            'url("https://example.com/remote.test/x.png")',
             id="escaped-backslash",
         ),
         pytest.param("url('a\\'b.png')", "url('https://example.com/dir/a\\'b.png')", id="escaped-quote"),
         pytest.param("url(a\\)b.png)", "url(https://example.com/dir/a\\)b.png)", id="bare-escaped-parenthesis"),
-        pytest.param("url(\\61 /b\\ c.png)", "url(https://example.com/dir/a/b\\20 c.png)", id="bare-escaped-space"),
+        pytest.param("url(\\61 /b\\ c.png)", "url(https://example.com/dir/a/b%20c.png)", id="bare-escaped-space"),
         pytest.param(
             'url("https://other.test/\\61")', 'url("https://other.test/\\61")', id="absolute-stays-as-written"
         ),
@@ -991,8 +1004,8 @@ def test_resolve_links_skips_extra_authority_slashes_in_every_location(markup: s
     [
         pytest.param("ftp://f.test/g/", "///elsewhere.test/x", "ftp://elsewhere.test/x", id="ftp-base"),
         pytest.param("ws://w.test/a", "ws:///elsewhere.test/x", "ws://elsewhere.test/x", id="ws-base-same-scheme"),
-        pytest.param(_RESOLVE_BASE, "///elsewhere.test", "https://elsewhere.test", id="host-only"),
-        pytest.param(_RESOLVE_BASE, "///elsewhere.test?q#f", "https://elsewhere.test?q#f", id="host-then-query"),
+        pytest.param(_RESOLVE_BASE, "///elsewhere.test", "https://elsewhere.test/", id="host-only"),
+        pytest.param(_RESOLVE_BASE, "///elsewhere.test?q#f", "https://elsewhere.test/?q#f", id="host-then-query"),
         pytest.param(
             _RESOLVE_BASE, "///u@elsewhere.test:8443/x", "https://u@elsewhere.test:8443/x", id="userinfo-and-port"
         ),
@@ -1011,9 +1024,132 @@ def test_resolve_links_skips_extra_authority_slashes_in_every_location(markup: s
         ),
         pytest.param("file:///srv/www/page.html", "///etc/hosts", "file:///etc/hosts", id="file-base-empty-host"),
         pytest.param("sftp://s.test/a/b", "///c/d", "sftp://s.test/c/d", id="non-special-base"),
+        pytest.param(_HTTPS, "ftp:///elsewhere.test/x", "ftp://elsewhere.test/x", id="foreign-special-scheme"),
+        pytest.param(_HTTPS, "WSS:////elsewhere.test/x", "wss://elsewhere.test/x", id="foreign-uppercase-four-slashes"),
+        pytest.param(_HTTPS, "http:///elsewhere.test?q#f", "http://elsewhere.test/?q#f", id="foreign-host-then-query"),
+        pytest.param(_HTTPS, "ftp:///", "ftp:///", id="foreign-special-no-host"),
+        pytest.param(_HTTPS, "sftp:///elsewhere.test/x", "sftp:///elsewhere.test/x", id="foreign-non-special-verbatim"),
+        pytest.param(_HTTPS, "file:///elsewhere.test/x", "file:///elsewhere.test/x", id="foreign-file-verbatim"),
+        pytest.param(
+            "foo://f.test/a", "ws:///elsewhere.test/x", "ws://elsewhere.test/x", id="non-special-base-foreign"
+        ),
+        pytest.param(
+            "file:///srv/www/page.html", "wss:///elsewhere.test/x", "wss://elsewhere.test/x", id="file-base-foreign"
+        ),
+        pytest.param(_HTTPS, "ftp:", "ftp:", id="foreign-scheme-no-slashes"),
+        pytest.param(_HTTPS, "ftp:elsewhere.test/x", "ftp://elsewhere.test/x", id="foreign-special-no-slash"),
+        pytest.param(_HTTPS, "ftp:/elsewhere.test/x", "ftp://elsewhere.test/x", id="foreign-special-one-slash"),
+        pytest.param(_HTTPS, "ftp:\\elsewhere.test/x", "ftp://elsewhere.test/x", id="foreign-special-one-backslash"),
+        pytest.param(_HTTPS, "ftp:elsewhere.test\\x", "ftp://elsewhere.test/x", id="foreign-special-backslash-path"),
+        pytest.param(
+            _HTTPS, "https://elsewhere.test/x\\y", "https://elsewhere.test/x/y", id="same-scheme-backslash-path"
+        ),
+        pytest.param(_HTTPS, "x\\y", "https://example.com/dir/x/y", id="relative-backslash-path"),
+        pytest.param(_HTTPS, "WSS://elsewhere.test/x", "wss://elsewhere.test/x", id="foreign-uppercase-scheme-host"),
+        pytest.param(_HTTPS, "ftp://elsewhere.test\\x", "ftp://elsewhere.test/x", id="foreign-backslash-in-path"),
+        pytest.param(_HTTPS, "ftp://\\elsewhere.test/x", "ftp://elsewhere.test/x", id="foreign-backslash-authority"),
+        pytest.param(_HTTPS, "ftp://?q", "ftp://?q", id="foreign-no-host"),
+        pytest.param(_HTTPS, "ftp://#f", "ftp://#f", id="foreign-no-host-fragment"),
+        pytest.param(_HTTPS, "ftp://", "ftp://", id="foreign-special-authority-only"),
+        pytest.param(_HTTPS, "ftp://elsewhere.test/x", "ftp://elsewhere.test/x", id="foreign-special-host-kept"),
+        pytest.param(_HTTPS, "ftp:///elsewhere.test:21/x", "ftp://elsewhere.test/x", id="foreign-default-port-dropped"),
+        pytest.param(_HTTPS, "ftp:\\\\\\elsewhere.test/x", "ftp://elsewhere.test/x", id="foreign-backslash-authority"),
     ],
 )
-def test_resolve_links_keeps_extra_authority_slash_boundaries(base: str, href: str, expected: str) -> None:
+def test_resolve_links_extra_authority_slash_boundaries(base: str, href: str, expected: str) -> None:
+    assert _resolved_href(href, base) == expected
+
+
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("file://h", "file://h/", id="host-gets-root-path"),
+        pytest.param("file://h?q", "file://h/?q", id="host-query-gets-root-path"),
+        pytest.param("file://h#f", "file://h/#f", id="host-fragment-gets-root-path"),
+        pytest.param("file://localhost/a", "file:///a", id="localhost-dropped"),
+        pytest.param("file://LOCALHOST/a", "file:///a", id="upper-case-localhost-dropped"),
+        pytest.param("file:///a/b", "file:///a/b", id="empty-host-kept"),
+        pytest.param("file:a/b", "file:///a/b", id="no-slashes-gets-empty-host"),
+        pytest.param("file:", "file:///", id="scheme-only-gets-root"),
+        pytest.param("file:/a", "file:///a", id="one-slash-gets-empty-host"),
+        pytest.param("file://C:/x", "file:///C:/x", id="drive-letter-host-moved-to-path"),
+        pytest.param("file:c:\\x", "file:///c:/x", id="drive-letter-backslash"),
+        pytest.param("file://h/a/../b", "file://h/b", id="dot-segments-removed"),
+        pytest.param("FILE://H/a", "file://h/a", id="scheme-and-host-lowercased"),
+        pytest.param("file://h:99999/a", "file://h:99999/a", id="out-of-range-port-kept-as-written"),
+    ],
+)
+def test_resolve_links_reads_a_file_link_as_the_url_standard_does(href: str, expected: str) -> None:
+    assert _resolved_href(href, _HTTPS) == expected
+
+
+@pytest.mark.parametrize(
+    ("base", "href", "expected"),
+    [
+        pytest.param("file:///srv/page.html", "file://h", "file://h/", id="file-base-host-gets-root-path"),
+        pytest.param("file:///srv/page.html", "file:x", "file:///srv/x", id="file-base-relative-kept"),
+    ],
+)
+def test_resolve_links_reads_a_file_link_under_a_file_base(base: str, href: str, expected: str) -> None:
+    assert _resolved_href(href, base) == expected
+
+
+@pytest.mark.parametrize(
+    ("base", "href", "expected"),
+    [
+        pytest.param("http:opaque", "x", "http://opaque/x", id="relative"),
+        pytest.param("http:opaque", "/x", "http://opaque/x", id="root-relative"),
+        pytest.param("http:opaque", "../x", "http://opaque/x", id="dot-segment"),
+        pytest.param("http:opaque", "?q", "http://opaque/?q", id="query"),
+        pytest.param("http:opaque", "#f", "http://opaque/#f", id="fragment"),
+        pytest.param("http:opaque", "//h/x", "http://h/x", id="network-path"),
+        pytest.param("http:a/b", "x", "http://a/x", id="path-after-host"),
+        pytest.param("http:opaque#old", "x", "http://opaque/x", id="old-fragment-dropped"),
+        pytest.param("https:opaque?q#old", "#f", "https://opaque/?q#f", id="query-kept-fragment-replaced"),
+        pytest.param("http:/a", "x", "http://a/x", id="one-slash-host"),
+        pytest.param("http:///opaque", "x", "http://opaque/x", id="extra-slashes-host"),
+        pytest.param("http:///opaque", "#f", "http://opaque/#f", id="extra-slashes-fragment"),
+        pytest.param("http:////opaque/a", "x", "http://opaque/x", id="four-slashes-path-replaced"),
+    ],
+)
+def test_resolve_links_reads_the_host_of_a_special_base_without_authority(base: str, href: str, expected: str) -> None:
+    assert _resolved_href(href, base) == expected
+
+
+@pytest.mark.parametrize(
+    ("base", "href"),
+    [
+        pytest.param("http:", "x", id="special-base-without-host"),
+        pytest.param("http:/", "x", id="special-base-one-slash"),
+        pytest.param("https://h:99999/a", "x", id="port-out-of-range"),
+        pytest.param("https://[h/a", "x", id="unbalanced-ipv6"),
+    ],
+)
+def test_resolve_links_leaves_links_under_a_base_the_url_standard_rejects_as_written(base: str, href: str) -> None:
+    assert _resolved_href(href, base) == href
+
+
+def test_resolve_links_keeps_an_over_length_base_as_written() -> None:
+    base = f"https://H/{'a/' * 1100}"
+    assert _resolved_href("x", base) == f"{base}x"
+
+
+@pytest.mark.parametrize(
+    ("base", "href", "expected"),
+    [
+        pytest.param("https://H.Example/a/b", "x", "https://h.example/a/x", id="host-lowercased"),
+        pytest.param("HTTPS://H/", "x", "https://h/x", id="scheme-and-host-lowercased"),
+        pytest.param("https://h:443/a", "x", "https://h/x", id="default-port-dropped"),
+        pytest.param("https://h:80/x/./y/..", "z", "https://h:80/x/z", id="other-port-kept-dot-segments-removed"),
+        pytest.param("https://h/a/../b/", "x", "https://h/b/x", id="dot-segments-in-base-path"),
+        pytest.param("https://\u00fc.example/a", "x", "https://xn--tda.example/x", id="non-ascii-host-punycoded"),
+        pytest.param("https://[::1]:443/a", "x", "https://[::1]/x", id="ipv6-default-port-dropped"),
+        pytest.param("foo://H/a", "x", "foo://H/x", id="non-special-host-kept"),
+        pytest.param("file:a/b", "x", "file:///a/x", id="file-base-without-authority"),
+        pytest.param("a/b", "x", "a/x", id="relative-base-joined-as-written"),
+    ],
+)
+def test_resolve_links_normalizes_the_base_before_joining(base: str, href: str, expected: str) -> None:
     assert _resolved_href(href, base) == expected
 
 
@@ -1042,8 +1178,6 @@ def test_resolve_links_requires_a_string_base() -> None:
     [
         pytest.param(_HTTPS, "https://host/p?q#f", id="same-scheme-absolute-skipped"),
         pytest.param(_HTTPS, "https://user:pw@host:8080/a;b?q#f", id="same-scheme-userinfo-port"),
-        pytest.param(_HTTPS, "https://HOST.example/Path", id="same-scheme-host-case-preserved"),
-        pytest.param(_HTTPS, "https://host/a/../b", id="same-scheme-dot-segments-preserved"),
         pytest.param(_HTTPS, "http://host/p", id="different-scheme-http"),
         pytest.param(_HTTPS, "mailto:a@b.test", id="different-scheme-not-relative"),
         pytest.param(_HTTPS, "data:text/plain,hi", id="different-scheme-data"),
@@ -1083,6 +1217,505 @@ def test_resolve_links_requires_a_string_base() -> None:
 )
 def test_resolve_matches_urljoin(base: str, href: str) -> None:
     assert _resolved_href(href, base) == urljoin(base, href)
+
+
+# WHATWG removes dot segments (%2e in any case included) from an absolute special-scheme URL and drops its default or
+# empty port (https://url.spec.whatwg.org/#port-state), which urljoin leaves as written.
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("https://host/a/../b", "https://host/b", id="dot-dot"),
+        pytest.param("https://host/a/./b", "https://host/a/b", id="dot"),
+        pytest.param("https://host/a/%2E%2e/b", "https://host/b", id="encoded-dot-dot"),
+        pytest.param("https://host/a/.%2e/b", "https://host/b", id="mixed-dot-dot"),
+        pytest.param("https://host/a/..", "https://host/", id="dot-dot-to-root"),
+        pytest.param("https://host:443/p", "https://host/p", id="https-default-port"),
+        pytest.param("https://host:0443/p", "https://host/p", id="https-default-port-leading-zeros"),
+        pytest.param("https://host:/p", "https://host/p", id="empty-port"),
+        pytest.param("https://host:0080/p", "https://host:80/p", id="leading-zeros-rewritten"),
+        pytest.param("https://host:8443/p", "https://host:8443/p", id="non-default-port-kept"),
+        pytest.param("https://u:p@host:443/p", "https://u:p@host/p", id="userinfo-default-port"),
+        pytest.param("https://[::1]:443/p", "https://[::1]/p", id="ipv6-default-port"),
+        pytest.param("http://host:80/p", "http://host/p", id="http-default-port"),
+        pytest.param("ws://host:80/p", "ws://host/p", id="ws-default-port"),
+        pytest.param("wss://host:443/p", "wss://host/p", id="wss-default-port"),
+        pytest.param("ftp://host:21/p", "ftp://host/p", id="ftp-default-port"),
+        pytest.param("https://HOST.Example/Path", "https://host.example/Path", id="host-lowercased"),
+        pytest.param("https://U:P@HOST.example/p", "https://U:P@host.example/p", id="userinfo-case-kept"),
+        pytest.param("https://[::A]:443/p", "https://[::a]/p", id="ipv6-lowercased"),
+    ],
+)
+def test_resolve_links_normalizes_absolute_special_urls(href: str, expected: str) -> None:
+    assert _resolved_href(href, _HTTPS) == expected
+
+
+# Every scheme with a port, empty, zero-padded, default, invalid or out-of-range, and every path that holds a dot-like
+# segment, against the WHATWG URL parser; a rejected reference stays as written.
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("https://h:443/p", "https://h/p", id="https-h-443-p"),
+        pytest.param("https://h:80/p", "https://h:80/p", id="https-h-80-p"),
+        pytest.param("https://h:21/p", "https://h:21/p", id="https-h-21-p"),
+        pytest.param("https://h:/p", "https://h/p", id="https-h-p"),
+        pytest.param("https://h:0443/p", "https://h/p", id="https-h-0443-p"),
+        pytest.param("https://h:0080/p", "https://h:80/p", id="https-h-0080-p"),
+        pytest.param("https://h:8080/p", "https://h:8080/p", id="https-h-8080-p"),
+        pytest.param("https://h:x/p", "https://h:x/p", id="https-h-x-p"),
+        pytest.param("https://h:99999/p", "https://h:99999/p", id="https-h-99999-p"),
+        pytest.param("https://h:443", "https://h/", id="https-h-443"),
+        pytest.param("https://h:443?q#f", "https://h/?q#f", id="https-h-443-q-f"),
+        pytest.param("https://h1/p", "https://h1/p", id="https-h1-p"),
+        pytest.param("https://h:1", "https://h:1/", id="https-h-1"),
+        pytest.param("https://u:1@h:443/p", "https://u:1@h/p", id="https-u-1-h-443-p"),
+        pytest.param("https://[::1]:443/p", "https://[::1]/p", id="https-1-443-p"),
+        pytest.param("https://h/a/%2/b", "https://h/a/%2/b", id="https-h-a-2-b"),
+        pytest.param("https://h/a/...", "https://h/a/...", id="https-h-a"),
+        pytest.param("https://h/%2e", "https://h/", id="https-h-2e"),
+        pytest.param("https://h/a/%2e.", "https://h/", id="https-h-a-2e"),
+        pytest.param("https://h/a/.%2e", "https://h/", id="https-h-a-2e"),
+        pytest.param("https://h/a/./b/../c", "https://h/a/c", id="https-h-a-b-c"),
+        pytest.param("http://h:443/p", "http://h:443/p", id="http-h-443-p"),
+        pytest.param("http://h:80/p", "http://h/p", id="http-h-80-p"),
+        pytest.param("http://h:21/p", "http://h:21/p", id="http-h-21-p"),
+        pytest.param("http://h:/p", "http://h/p", id="http-h-p"),
+        pytest.param("http://h:0443/p", "http://h:443/p", id="http-h-0443-p"),
+        pytest.param("http://h:0080/p", "http://h/p", id="http-h-0080-p"),
+        pytest.param("http://h:8080/p", "http://h:8080/p", id="http-h-8080-p"),
+        pytest.param("http://h:x/p", "http://h:x/p", id="http-h-x-p"),
+        pytest.param("http://h:99999/p", "http://h:99999/p", id="http-h-99999-p"),
+        pytest.param("http://h:443", "http://h:443/", id="http-h-443"),
+        pytest.param("http://h:443?q#f", "http://h:443/?q#f", id="http-h-443-q-f"),
+        pytest.param("http://h1/p", "http://h1/p", id="http-h1-p"),
+        pytest.param("http://h:1", "http://h:1/", id="http-h-1"),
+        pytest.param("http://u:1@h:443/p", "http://u:1@h:443/p", id="http-u-1-h-443-p"),
+        pytest.param("http://[::1]:443/p", "http://[::1]:443/p", id="http-1-443-p"),
+        pytest.param("http://h/a/%2/b", "http://h/a/%2/b", id="http-h-a-2-b"),
+        pytest.param("http://h/a/...", "http://h/a/...", id="http-h-a"),
+        pytest.param("http://h/%2e", "http://h/", id="http-h-2e"),
+        pytest.param("http://h/a/%2e.", "http://h/", id="http-h-a-2e"),
+        pytest.param("http://h/a/.%2e", "http://h/", id="http-h-a-2e"),
+        pytest.param("http://h/a/./b/../c", "http://h/a/c", id="http-h-a-b-c"),
+        pytest.param("ws://h:443/p", "ws://h:443/p", id="ws-h-443-p"),
+        pytest.param("ws://h:80/p", "ws://h/p", id="ws-h-80-p"),
+        pytest.param("ws://h:21/p", "ws://h:21/p", id="ws-h-21-p"),
+        pytest.param("ws://h:/p", "ws://h/p", id="ws-h-p"),
+        pytest.param("ws://h:0443/p", "ws://h:443/p", id="ws-h-0443-p"),
+        pytest.param("ws://h:0080/p", "ws://h/p", id="ws-h-0080-p"),
+        pytest.param("ws://h:8080/p", "ws://h:8080/p", id="ws-h-8080-p"),
+        pytest.param("ws://h:x/p", "ws://h:x/p", id="ws-h-x-p"),
+        pytest.param("ws://h:99999/p", "ws://h:99999/p", id="ws-h-99999-p"),
+        pytest.param("ws://h:443", "ws://h:443/", id="ws-h-443"),
+        pytest.param("ws://h:443?q#f", "ws://h:443/?q#f", id="ws-h-443-q-f"),
+        pytest.param("ws://h1/p", "ws://h1/p", id="ws-h1-p"),
+        pytest.param("ws://h:1", "ws://h:1/", id="ws-h-1"),
+        pytest.param("ws://u:1@h:443/p", "ws://u:1@h:443/p", id="ws-u-1-h-443-p"),
+        pytest.param("ws://[::1]:443/p", "ws://[::1]:443/p", id="ws-1-443-p"),
+        pytest.param("ws://h/a/%2/b", "ws://h/a/%2/b", id="ws-h-a-2-b"),
+        pytest.param("ws://h/a/...", "ws://h/a/...", id="ws-h-a"),
+        pytest.param("ws://h/%2e", "ws://h/", id="ws-h-2e"),
+        pytest.param("ws://h/a/%2e.", "ws://h/", id="ws-h-a-2e"),
+        pytest.param("ws://h/a/.%2e", "ws://h/", id="ws-h-a-2e"),
+        pytest.param("ws://h/a/./b/../c", "ws://h/a/c", id="ws-h-a-b-c"),
+        pytest.param("wss://h:443/p", "wss://h/p", id="wss-h-443-p"),
+        pytest.param("wss://h:80/p", "wss://h:80/p", id="wss-h-80-p"),
+        pytest.param("wss://h:21/p", "wss://h:21/p", id="wss-h-21-p"),
+        pytest.param("wss://h:/p", "wss://h/p", id="wss-h-p"),
+        pytest.param("wss://h:0443/p", "wss://h/p", id="wss-h-0443-p"),
+        pytest.param("wss://h:0080/p", "wss://h:80/p", id="wss-h-0080-p"),
+        pytest.param("wss://h:8080/p", "wss://h:8080/p", id="wss-h-8080-p"),
+        pytest.param("wss://h:x/p", "wss://h:x/p", id="wss-h-x-p"),
+        pytest.param("wss://h:99999/p", "wss://h:99999/p", id="wss-h-99999-p"),
+        pytest.param("wss://h:443", "wss://h/", id="wss-h-443"),
+        pytest.param("wss://h:443?q#f", "wss://h/?q#f", id="wss-h-443-q-f"),
+        pytest.param("wss://h1/p", "wss://h1/p", id="wss-h1-p"),
+        pytest.param("wss://h:1", "wss://h:1/", id="wss-h-1"),
+        pytest.param("wss://u:1@h:443/p", "wss://u:1@h/p", id="wss-u-1-h-443-p"),
+        pytest.param("wss://[::1]:443/p", "wss://[::1]/p", id="wss-1-443-p"),
+        pytest.param("wss://h/a/%2/b", "wss://h/a/%2/b", id="wss-h-a-2-b"),
+        pytest.param("wss://h/a/...", "wss://h/a/...", id="wss-h-a"),
+        pytest.param("wss://h/%2e", "wss://h/", id="wss-h-2e"),
+        pytest.param("wss://h/a/%2e.", "wss://h/", id="wss-h-a-2e"),
+        pytest.param("wss://h/a/.%2e", "wss://h/", id="wss-h-a-2e"),
+        pytest.param("wss://h/a/./b/../c", "wss://h/a/c", id="wss-h-a-b-c"),
+        pytest.param("ftp://h:443/p", "ftp://h:443/p", id="ftp-h-443-p"),
+        pytest.param("ftp://h:80/p", "ftp://h:80/p", id="ftp-h-80-p"),
+        pytest.param("ftp://h:21/p", "ftp://h/p", id="ftp-h-21-p"),
+        pytest.param("ftp://h:/p", "ftp://h/p", id="ftp-h-p"),
+        pytest.param("ftp://h:0443/p", "ftp://h:443/p", id="ftp-h-0443-p"),
+        pytest.param("ftp://h:0080/p", "ftp://h:80/p", id="ftp-h-0080-p"),
+        pytest.param("ftp://h:8080/p", "ftp://h:8080/p", id="ftp-h-8080-p"),
+        pytest.param("ftp://h:x/p", "ftp://h:x/p", id="ftp-h-x-p"),
+        pytest.param("ftp://h:99999/p", "ftp://h:99999/p", id="ftp-h-99999-p"),
+        pytest.param("ftp://h:443", "ftp://h:443/", id="ftp-h-443"),
+        pytest.param("ftp://h:443?q#f", "ftp://h:443/?q#f", id="ftp-h-443-q-f"),
+        pytest.param("ftp://h1/p", "ftp://h1/p", id="ftp-h1-p"),
+        pytest.param("ftp://h:1", "ftp://h:1/", id="ftp-h-1"),
+        pytest.param("ftp://u:1@h:443/p", "ftp://u:1@h:443/p", id="ftp-u-1-h-443-p"),
+        pytest.param("ftp://[::1]:443/p", "ftp://[::1]:443/p", id="ftp-1-443-p"),
+        pytest.param("ftp://h/a/%2/b", "ftp://h/a/%2/b", id="ftp-h-a-2-b"),
+        pytest.param("ftp://h/a/...", "ftp://h/a/...", id="ftp-h-a"),
+        pytest.param("ftp://h/%2e", "ftp://h/", id="ftp-h-2e"),
+        pytest.param("ftp://h/a/%2e.", "ftp://h/", id="ftp-h-a-2e"),
+        pytest.param("ftp://h/a/.%2e", "ftp://h/", id="ftp-h-a-2e"),
+        pytest.param("ftp://h/a/./b/../c", "ftp://h/a/c", id="ftp-h-a-b-c"),
+        pytest.param("https://a:1b1/p", "https://a:1b1/p", id="https-a-1b1-p"),
+        pytest.param("https://h:65535/p", "https://h:65535/p", id="https-h-65535-p"),
+        pytest.param("https://h:65536/p", "https://h:65536/p", id="https-h-65536-p"),
+        pytest.param("https://h:0/p", "https://h:0/p", id="https-h-0-p"),
+        pytest.param("https://h:00443/p", "https://h/p", id="https-h-00443-p"),
+        pytest.param("https://h:21x/p", "https://h:21x/p", id="https-h-21x-p"),
+        pytest.param("https://h:/", "https://h/", id="https-h"),
+        pytest.param("https://h/a/.x", "https://h/a/.x", id="https-h-a-x"),
+        pytest.param("https://h/a/%2ex", "https://h/a/%2ex", id="https-h-a-2ex"),
+        pytest.param("https://h/a/%2", "https://h/a/%2", id="https-h-a-2"),
+        pytest.param("https://h/a/%", "https://h/a/%", id="https-h-a"),
+        pytest.param("https://h/a/%2e%2", "https://h/a/%2e%2", id="https-h-a-2e-2"),
+        pytest.param("https://h/a/%3e", "https://h/a/%3e", id="https-h-a-3e"),
+        pytest.param("https://h/a/%2f", "https://h/a/%2f", id="https-h-a-2f"),
+        pytest.param("https://h/a/%zz", "https://h/a/%zz", id="https-h-a-zz"),
+        pytest.param("https://h/a/%2e%2e%2e", "https://h/a/%2e%2e%2e", id="https-h-a-2e-2e-2e"),
+        pytest.param("https://h/a/%2e%2e%2e/b", "https://h/a/%2e%2e%2e/b", id="https-h-a-2e-2e-2e-b"),
+        pytest.param("https://h/a/..%", "https://h/a/..%", id="https-h-a"),
+        pytest.param("https://h/a/%%2e", "https://h/a/%%2e", id="https-h-a-2e"),
+        pytest.param("https://h/a/.%2e/b", "https://h/b", id="https-h-a-2e-b"),
+        pytest.param("https://h/a/%2E/b", "https://h/a/b", id="https-h-a-2e-b"),
+        pytest.param("https://h\\p", "https://h/p", id="https-h-p"),
+        pytest.param("https://h\\p/q", "https://h/p/q", id="https-h-p-q"),
+        pytest.param("https://h/a\\b", "https://h/a/b", id="https-h-a-b"),
+        pytest.param("HTTPS://HOST1/p", "https://host1/p", id="https-host1-p"),
+        pytest.param("HTTPS://HOST:00/p", "https://host:0/p", id="https-host-00-p"),
+        pytest.param("HTTPS://HOST:0/p", "https://host:0/p", id="https-host-0-p"),
+        pytest.param("HTTPS://HOST:443/a/../b", "https://host/b", id="https-host-443-a-b"),
+        pytest.param("HTTPS://u:P@HOST/p", "https://u:P@host/p", id="https-u-p-host-p"),
+        pytest.param("https://h:1/x", "https://h:1/x", id="https-h-1-x"),
+        pytest.param("https://h/.xyz/q", "https://h/.xyz/q", id="https-h-xyz-q"),
+        pytest.param("https://h/a/..?q", "https://h/?q", id="https-h-a-q"),
+        pytest.param("https://h/.x?q", "https://h/.x?q", id="https-h-x-q"),
+        pytest.param("https://h/a/%2e%2e%2e%2e", "https://h/a/%2e%2e%2e%2e", id="https-h-a-2e-2e-2e-2e"),
+        pytest.param("https://h/a/..../x", "https://h/a/..../x", id="https-h-a-x"),
+        pytest.param("https://h/.x#f", "https://h/.x#f", id="https-h-x-f"),
+        pytest.param("https://h/..#f", "https://h/#f", id="https-h-f"),
+        pytest.param("https://h#f", "https://h/#f", id="https-h-f"),
+        pytest.param("https://h?q", "https://h/?q", id="https-h-q"),
+        pytest.param("https://h/a/%2?q", "https://h/a/%2?q", id="https-h-a-2-q"),
+        pytest.param("https://h/a/.%2e?q", "https://h/?q", id="https-h-a-2e-q"),
+        pytest.param("http://h:65536/p", "http://h:65536/p", id="http-h-65536-p"),
+        pytest.param("https://h/p?q#f", "https://h/p?q#f", id="https-h-p-q-f"),
+        pytest.param("https://h?#f", "https://h/?#f", id="https-h-f"),
+        pytest.param("file://h:21/p", "file://h:21/p", id="file-h-21-p"),
+        pytest.param("https://h/p?Į", "https://h/p?%C4%AE", id="https-h-p"),
+    ],
+)
+def test_resolve_links_special_urls_match_whatwg(href: str, expected: str) -> None:
+    assert _resolved_href(href, _HTTPS) == expected
+
+
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("https://h/a b?q x#f g", "https://h/a%20b?q%20x#f%20g", id="space-in-path-query-fragment"),
+        pytest.param("https://a b:c d@h/p", "https://a%20b:c%20d@h/p", id="space-in-userinfo"),
+        pytest.param("https://h/a\u2028b", "https://h/a%E2%80%A8b", id="line-separator-in-path"),
+        pytest.param("https://h/a\u00a0b", "https://h/a%C2%A0b", id="nbsp-in-path"),
+        pytest.param("https://h/a\tb", "https://h/ab", id="tab-removed"),
+        pytest.param("foo://h/a b", "foo://h/a%20b", id="space-in-non-special-path"),
+        pytest.param("https://h:99999/a b", "https://h:99999/a b", id="unparsable-kept-as-written"),
+        pytest.param("https://a b/", "https://a b/", id="space-in-host-kept-as-written"),
+        pytest.param("wss:a b", "wss:a b", id="space-in-slashless-host-kept-as-written"),
+        pytest.param("https:///a b", "https:///a b", id="space-in-host-after-slashes-kept-as-written"),
+        pytest.param("a b", "https://example.com/dir/a%20b", id="relative-path"),
+        pytest.param("/a b", "https://example.com/a%20b", id="root-relative-path"),
+        pytest.param("../a b", "https://example.com/a%20b", id="parent-relative-path"),
+        pytest.param("//h/a b", "https://h/a%20b", id="scheme-relative"),
+        pytest.param("https:h/a b", "https://example.com/dir/h/a%20b", id="same-scheme-without-slashes"),
+        pytest.param("a/ü", "https://example.com/dir/a/%C3%BC", id="relative-non-ascii"),
+        pytest.param("#a b", "https://example.com/dir/#a%20b", id="fragment-only"),
+        pytest.param("?q x", "https://example.com/dir/?q%20x", id="query-only"),
+        pytest.param("mailto:ü", "mailto:%C3%BC", id="foreign-scheme-non-ascii"),
+        pytest.param("foo:/a b", "foo:/a%20b", id="foreign-scheme-path"),
+        pytest.param("file:a b", "file:///a%20b", id="file-no-slashes"),
+        pytest.param("file:///a b", "file:///a%20b", id="file-empty-host"),
+    ],
+)
+def test_resolve_links_encodes_whitespace_in_a_link(href: str, expected: str) -> None:
+    assert _resolved_href(href, _HTTPS) == expected
+
+
+@pytest.mark.parametrize(
+    ("href", "base", "expected"),
+    [
+        pytest.param("#a b", "mailto:x", "mailto:x#a%20b", id="fragment-on-opaque-base"),
+        pytest.param("ht\ttps://h/", "mailto:x", "https://h/", id="tab-in-scheme-on-opaque-base"),
+        pytest.param("https://h/a\tb", "file:///home/u/x.html", "https://h/ab", id="tab-on-file-base"),
+        pytest.param("http://h/a/..\n/b", "file:///home/u/x.html", "http://h/b", id="newline-on-file-base"),
+        pytest.param("C\t:/x", "file:///C:/dir/f", "c:/x", id="tab-in-scheme-on-file-base"),
+        pytest.param(
+            "javascript:alert(1);\nalert(2)", _HTTPS, "javascript:alert(1);alert(2)", id="newline-in-javascript"
+        ),
+        pytest.param(
+            "data:image/png;base64,iVBO\nRw0K", _HTTPS, "data:image/png;base64,iVBORw0K", id="newline-in-data"
+        ),
+        pytest.param("ja\tvascript:x", _HTTPS, "javascript:x", id="tab-in-foreign-scheme"),
+        pytest.param("foo:a?c\td#e\tf", _HTTPS, "foo:a?cd#ef", id="tab-in-foreign-query-and-fragment"),
+    ],
+)
+def test_resolve_links_removes_tab_and_newline_from_a_link(href: str, base: str, expected: str) -> None:
+    assert _resolved_href(href, base) == expected
+
+
+# WHATWG reads a numeric host of a special scheme as an IPv4 address (decimal, octal or hex, one to four parts) and
+# writes it dotted (https://url.spec.whatwg.org/#concept-ipv4-parser).
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("https://123/p", "https://0.0.0.123/p", id="decimal-integer"),
+        pytest.param("https://0x7f.1/p", "https://127.0.0.1/p", id="hex-then-decimal"),
+        pytest.param("https://127.1/p", "https://127.0.0.1/p", id="two-parts"),
+        pytest.param("https://0177.0.0.1/p", "https://127.0.0.1/p", id="octal-part"),
+        pytest.param("https://0XFF.1/p", "https://255.0.0.1/p", id="upper-hex-prefix"),
+        pytest.param("https://1.2.3.4./p", "https://1.2.3.4/p", id="trailing-dot"),
+        pytest.param("https://0x/p", "https://0.0.0.0/p", id="bare-hex-prefix"),
+        pytest.param("https://1.0x/p", "https://1.0.0.0/p", id="empty-hex-last-part"),
+        pytest.param("https://1.0X/p", "https://1.0.0.0/p", id="upper-empty-hex-last-part"),
+        pytest.param("https://0x7f.0x/p", "https://127.0.0.0/p", id="empty-hex-part"),
+        pytest.param("https://4294967295/p", "https://255.255.255.255/p", id="largest-integer"),
+        pytest.param("https://123.456/p", "https://123.0.1.200/p", id="last-part-fills-two-octets"),
+        pytest.param("https://127.0.0.1/p", "https://127.0.0.1/p", id="dotted-quad-unchanged"),
+        pytest.param("https://0x7f.0.0.1:443/p", "https://127.0.0.1/p", id="default-port-dropped"),
+        pytest.param("https://123:8443/p", "https://0.0.0.123:8443/p", id="port-kept"),
+        pytest.param("https://u:P@123/p", "https://u:P@0.0.0.123/p", id="userinfo-kept"),
+        pytest.param("https://%31%32%33/p", "https://0.0.0.123/p", id="percent-encoded-digits"),
+        pytest.param("https://%30x7f/p", "https://0.0.0.127/p", id="percent-encoded-hex-prefix"),
+        pytest.param("https://\uff11\uff12\uff13.4/p", "https://123.0.0.4/p", id="fullwidth-digits"),
+        pytest.param(
+            "https://\uff10\uff38\uff43\uff10\uff0e\uff10\uff12\uff15\uff10\uff0e\uff10\uff11/p",
+            "https://192.168.0.1/p",
+            id="fullwidth-hex",
+        ),
+        pytest.param("http://123:80/p", "http://0.0.0.123/p", id="http-default-port-dropped"),
+        pytest.param("ftp://123:21/p", "ftp://0.0.0.123/p", id="ftp-default-port-dropped"),
+        pytest.param("//0x7f.1/p", "https://127.0.0.1/p", id="scheme-relative"),
+    ],
+)
+def test_resolve_links_writes_numeric_hosts_as_ipv4(href: str, expected: str) -> None:
+    assert _resolved_href(href, _HTTPS) == expected
+
+
+# A host the IPv4 parser rejects keeps its authority as written, port included; a name that only looks numeric
+# is a name.
+@pytest.mark.parametrize(
+    "href",
+    [
+        pytest.param("https://1.2.3.4.5/p", id="five-parts"),
+        pytest.param("https://1.2.3.4.5:443/p", id="five-parts-keeps-port"),
+        pytest.param("https://256.1.1.1/p", id="octet-out-of-range"),
+        pytest.param("https://4294967296/p", id="integer-overflow"),
+        pytest.param("https://0x100000000/p", id="hex-overflow"),
+        pytest.param("https://1.2.3.4a.5/p", id="non-number-part"),
+        pytest.param("https://1..2/p", id="empty-part"),
+        pytest.param("https://a%20b.123:443/p", id="forbidden-code-point-keeps-port"),
+        pytest.param("https://x\u2028.com:443/p", id="failed-mapping-keeps-port"),
+        pytest.param("https://a%/p", id="trailing-percent"),
+        pytest.param("https://a\u2028/p", id="non-ascii-last-code-point"),
+        pytest.param("https://1.0x7g/p", id="last-label-not-hex"),
+        pytest.param("https://1.0b/p", id="last-label-zero-without-x"),
+        pytest.param("https://:80x/p", id="empty-host-keeps-authority"),
+        pytest.param("https://:443/p", id="empty-host-default-port-kept"),
+        pytest.param("https://1.2.3.4../p", id="empty-last-label-is-a-name"),
+    ],
+)
+def test_resolve_links_keeps_a_host_the_ipv4_parser_rejects(href: str) -> None:
+    assert _resolved_href(href, _HTTPS) == href
+
+
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("https://%41.com:443/p", "https://a.com/p", id="escaped-name-decoded"),
+        pytest.param("https://A%42.com/p", "https://ab.com/p", id="escaped-and-upper-case"),
+        pytest.param("https://%61%62.com/p", "https://ab.com/p", id="escaped-letters"),
+        pytest.param("https://x.%41/p", "https://x.a/p", id="escaped-last-label"),
+        pytest.param("https://%41.%42.%43/p", "https://a.b.c/p", id="escaped-every-label"),
+        pytest.param("https://a%2E/p", "https://a./p", id="escaped-dot-kept-as-trailing-dot"),
+        pytest.param("https://%2e%2e.com/p", "https://...com/p", id="escaped-dot-in-label"),
+        pytest.param("https://u%41@%41.com:443/p", "https://u%41@a.com/p", id="userinfo-kept"),
+        pytest.param("https://%41%42/p", "https://ab/p", id="single-label"),
+        pytest.param("https://%41.com/a/../b", "https://a.com/b", id="escaped-host-with-dot-segment"),
+    ],
+)
+def test_resolve_links_decodes_a_percent_encoded_registered_name(href: str, expected: str) -> None:
+    assert _resolved_href(href, _HTTPS) == expected
+
+
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("https://\u4f8b.jp/p", "https://xn--fsq.jp/p", id="cjk-label"),
+        pytest.param("https://EXAMPLE.\u4f8b/p", "https://example.xn--fsq/p", id="upper-case-with-cjk-label"),
+        pytest.param("https://M\u00dcNCHEN.de/p", "https://xn--mnchen-3ya.de/p", id="upper-case-umlaut"),
+        pytest.param("https://\u212a.example/p", "https://k.example/p", id="kelvin-sign-folds"),
+        pytest.param("https://\u00e9t\u00e9.fr/p", "https://xn--t-9fab.fr/p", id="accented-label"),
+        pytest.param("https://a\u00adb.com/p", "https://ab.com/p", id="soft-hyphen-removed"),
+        pytest.param("https://\uff21\uff22.com/p", "https://ab.com/p", id="fullwidth-letters"),
+        pytest.param("https://\u4f8b.\u4f8b/p", "https://xn--fsq.xn--fsq/p", id="cjk-every-label"),
+        pytest.param("https://\u0130.com/p", "https://xn--i-9bb.com/p", id="dotted-capital-i"),
+        pytest.param("https://\u00df.de/p", "https://xn--zca.de/p", id="sharp-s"),
+        pytest.param("https://\u4f8b.jp:443/p", "https://xn--fsq.jp/p", id="default-port-dropped"),
+        pytest.param("https://\u4f8b.jp:8080/p", "https://xn--fsq.jp:8080/p", id="port-kept"),
+        pytest.param("https://\u4f8b.jp/a/../b", "https://xn--fsq.jp/b", id="dot-segment"),
+        pytest.param("https://\u4f8b.jp:/p", "https://xn--fsq.jp/p", id="empty-port"),
+        pytest.param("//\u4f8b.jp/p", "https://xn--fsq.jp/p", id="scheme-relative"),
+        pytest.param("https://\u4f8b.xn--fiqs8s/p", "https://xn--fsq.xn--fiqs8s/p", id="existing-ace-label-kept"),
+        pytest.param("https://%E4%BE%8B.jp/p", "https://xn--fsq.jp/p", id="percent-encoded-cjk"),
+        pytest.param("https://%c3%a9.com/p", "https://xn--9ca.com/p", id="percent-encoded-accent"),
+    ],
+)
+def test_resolve_links_punycodes_an_internationalized_host(href: str, expected: str) -> None:
+    assert _resolved_href(href, _HTTPS) == expected
+
+
+@pytest.mark.parametrize("href", ["https://%20.com/p", "https://%zz.com/p", "https://a%2Fb.com/p"])
+def test_resolve_links_keeps_an_escaped_name_with_a_forbidden_code_point(href: str) -> None:
+    assert _resolved_href(href, _HTTPS) == href
+
+
+# WHATWG removes the dot segments of a path under every scheme, not only the special ones
+# (https://url.spec.whatwg.org/#path-state), and keeps an opaque path (no slash after the scheme) as written. A path
+# that starts with two slashes keeps its root segment, so "//" is not lost, and a URL without a host gets "/." in front.
+@pytest.mark.parametrize(
+    ("base", "href", "expected"),
+    [
+        pytest.param("foo://example.com/a/b", "/x/../y", "foo://example.com/y", id="rooted-dot-dot"),
+        pytest.param("foo://example.com/a/b", "/x/./y", "foo://example.com/x/y", id="rooted-dot"),
+        pytest.param("foo://example.com/a/b", "/x/%2e%2E/y", "foo://example.com/y", id="encoded-dot-dot"),
+        pytest.param("foo://example.com/a/b", "/x/%2E/y", "foo://example.com/x/y", id="encoded-dot"),
+        pytest.param("foo://example.com/a/b", "/x/.%2e/z", "foo://example.com/z", id="mixed-encoded-dot-dot"),
+        pytest.param("foo://example.com/a/b", "x/../y", "foo://example.com/a/y", id="relative-dot-dot"),
+        pytest.param("foo://example.com/a/b", "../y", "foo://example.com/y", id="relative-climbs-to-root"),
+        pytest.param("foo://example.com/a/b", "./y", "foo://example.com/a/y", id="relative-dot"),
+        pytest.param("foo://example.com/a/b", "/x/..", "foo://example.com/", id="dot-dot-to-root"),
+        pytest.param("foo://example.com/a/b", "/x/.", "foo://example.com/x/", id="dot-to-directory"),
+        pytest.param("foo://example.com/a/b", "/x/y/..?q", "foo://example.com/x/?q", id="dot-dot-before-query"),
+        pytest.param("foo://example.com/a/b", "?q", "foo://example.com/a/b?q", id="query-keeps-path"),
+        pytest.param("foo://example.com/a/b", "#f", "foo://example.com/a/b#f", id="fragment-keeps-path"),
+        pytest.param("foo://example.com/a/b", "\\x/../y", "foo://example.com/a/y", id="backslash-is-not-a-separator"),
+        pytest.param("foo://example.com/a/b", "/x/..x/y", "foo://example.com/x/..x/y", id="dot-prefixed-name"),
+        pytest.param("foo://example.com/a/b", "/x/a%2e/b", "foo://example.com/x/a%2e/b", id="encoded-dot-in-name"),
+        pytest.param("foo://example.com/a/b", "//host/x/../y", "foo://host/y", id="network-path"),
+        pytest.param("foo://example.com/a/b", "/a/..//b", "foo://example.com//b", id="root-kept-before-slash"),
+        pytest.param("foo://example.com/a/b", "/..//path", "foo://example.com//path", id="root-kept-at-start"),
+        pytest.param("foo:/a/b", "/x/../y", "foo:/y", id="no-host-rooted"),
+        pytest.param("foo:/a/b", "x/../y", "foo:/a/y", id="no-host-relative"),
+        pytest.param("foo:/a/b", "//host/x/../y", "foo://host/y", id="no-host-network-path"),
+        pytest.param("foo:a/b", "/x/../y", "/x/../y", id="opaque-base-kept"),
+        pytest.param("sftp://h/a/b/c", "/x/%2e%2E/y", "sftp://h/y", id="sftp-encoded-dot-dot"),
+        pytest.param("sftp://h/a/b/c", "../y", "sftp://h/a/y", id="sftp-relative-dot-dot"),
+        pytest.param("sftp://h/a/b/c", "x/../y", "sftp://h/a/b/y", id="sftp-relative-dot-dot-in-directory"),
+        pytest.param(_HTTPS, "sftp://h/x/../y", "sftp://h/y", id="other-scheme-absolute"),
+        pytest.param(_HTTPS, "sftp://h/x/%2E/y", "sftp://h/x/y", id="other-scheme-absolute-encoded-dot"),
+        pytest.param(_HTTPS, "sftp:/x/../y", "sftp:/y", id="other-scheme-no-host"),
+        pytest.param(_HTTPS, "/..//path", "https://example.com//path", id="special-root-kept"),
+        pytest.param(_HTTPS, "//x/..//p", "https://x//p", id="special-network-path-root-kept"),
+        pytest.param("foo://example.com/a/b", "foo:/x/../y", "foo:/y", id="same-scheme-no-host"),
+        pytest.param("foo://example.com/a/b", "foo://h/x/../y", "foo://h/y", id="same-scheme-absolute"),
+        pytest.param("foo://example.com/a/b", "foo://UPPER:22/x/../y", "foo://UPPER:22/y", id="host-and-port-kept"),
+        pytest.param("foo://example.com/a/b", "foo:x/../y", "foo:x/../y", id="same-scheme-opaque-kept"),
+        pytest.param("foo://example.com/a/b", "foo://h/x/./y?q#f", "foo://h/x/y?q#f", id="query-and-fragment-kept"),
+        pytest.param("foo://example.com/a/b", "foo://h", "foo://h", id="empty-path-unchanged"),
+        pytest.param("foo://example.com/a/b", "foo://h/a/../../..", "foo://h/", id="climbing-past-root"),
+        pytest.param("foo://example.com/a/b", "sftp://h/x/../y", "sftp://h/y", id="other-non-special-absolute"),
+        pytest.param(
+            "foo://example.com/a/b", "https://h/x/../y", "https://h/y", id="special-absolute-under-non-special"
+        ),
+        pytest.param("foo://example.com/a/b", "sftp://h/", "sftp://h/", id="non-special-trailing-slash"),
+        pytest.param("non-spec:/a/b", "//x/..//p", "non-spec://x//p", id="non-special-root-kept-with-host"),
+        pytest.param(
+            "foo://example.com/a/b",
+            "/a/../b/%2e%2e/c/./d",
+            "foo://example.com/c/d",
+            id="several-dot-segments",
+        ),
+    ],
+)
+def test_resolve_links_removes_dot_segments_under_any_scheme(base: str, href: str, expected: str) -> None:
+    assert _resolved_href(href, base) == expected
+
+
+# A fragment-only reference keeps an opaque base's path and query and takes the reference's fragment
+# (https://url.spec.whatwg.org/#path-state); a reference with a path or query under an opaque base is rejected and kept.
+@pytest.mark.parametrize(
+    ("base", "href", "expected"),
+    [
+        pytest.param("foo:a/b", "#f", "foo:a/b#f", id="fragment"),
+        pytest.param("foo:a/b#old", "#f", "foo:a/b#f", id="replaces-base-fragment"),
+        pytest.param("foo:a/b?q#old", "#f", "foo:a/b?q#f", id="keeps-base-query"),
+        pytest.param("foo:a/b?q", "#", "foo:a/b?q#", id="empty-fragment"),
+        pytest.param("foo:a/b", "#a#b", "foo:a/b#a#b", id="second-hash-kept"),
+        pytest.param("foo:a/b", "#f?q", "foo:a/b#f?q", id="question-mark-in-fragment"),
+        pytest.param("mailto:x@x.com", "#x", "mailto:x@x.com#x", id="mailto-base"),
+        pytest.param("data:,", "#", "data:,#", id="data-base"),
+        pytest.param("about:blank", "#x", "about:blank#x", id="about-base"),
+        pytest.param("foo:/a/b", "#f", "foo:/a/b#f", id="hierarchical-base-unchanged"),
+        pytest.param("foo:a/b", "?q#f", "?q#f", id="query-rejected-kept"),
+        pytest.param("foo:a/b", "x", "x", id="path-rejected-kept"),
+    ],
+)
+def test_resolve_links_resolves_a_fragment_against_an_opaque_base(base: str, href: str, expected: str) -> None:
+    assert _resolved_href(href, base) == expected
+
+
+# A base with an empty path is serialized with its root "/" before a query or fragment, or a relative path, is joined
+# onto it (https://url.spec.whatwg.org/#url-path-serializer).
+@pytest.mark.parametrize(
+    ("base", "href", "expected"),
+    [
+        pytest.param("https://h", "#f", "https://h/#f", id="fragment"),
+        pytest.param("https://h", "?q", "https://h/?q", id="query"),
+        pytest.param("https://h", "x", "https://h/x", id="relative-path"),
+        pytest.param("https://u@h?z", "?q#f", "https://u@h/?q#f", id="userinfo-and-base-query"),
+        pytest.param("https://h", "//k/j", "https://k/j", id="network-path"),
+    ],
+)
+def test_resolve_links_roots_a_base_without_a_path(base: str, href: str, expected: str) -> None:
+    assert _resolved_href(href, base) == expected
+
+
+# A userinfo is percent-encoded with the userinfo set, the first ':' separates the username from the password, and an
+# escape that is already there is kept (https://url.spec.whatwg.org/#userinfo-percent-encode-set).
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("https://u\u00fc@h/p", "https://u%C3%BC@h/p", id="non-ascii"),
+        pytest.param("https://a b@h/p", "https://a%20b@h/p", id="space"),
+        pytest.param('https://a"b@h/p', "https://a%22b@h/p", id="quote"),
+        pytest.param("https://a<b>@h/p", "https://a%3Cb%3E@h/p", id="angle-brackets"),
+        pytest.param("https://a:b:c@h/p", "https://a:b%3Ac@h/p", id="second-colon-escaped"),
+        pytest.param("https://a@b@c@h/p", "https://a%40b%40c@h/p", id="earlier-at-escaped"),
+        pytest.param("https://a%20b@h/p", "https://a%20b@h/p", id="existing-escape-kept"),
+        pytest.param("https://a%zz@h/p", "https://a%zz@h/p", id="invalid-escape-kept"),
+        pytest.param("https://u:p q@h:443/p", "https://u:p%20q@h/p", id="password-and-default-port"),
+        pytest.param("https://a;b@h/p", "https://a%3Bb@h/p", id="semicolon"),
+        pytest.param("//a b@h/p", "https://a%20b@h/p", id="network-path"),
+        pytest.param("foo://a b@h/p", "foo://a%20b@h/p", id="non-special-scheme"),
+        pytest.param("https://a b@h/p?q#f", "https://a%20b@h/p?q#f", id="query-and-fragment-kept"),
+        pytest.param("https://\u4f8b@h/p", "https://%E4%BE%8B@h/p", id="three-byte-code-point"),
+        pytest.param("https://\U0001f600@h/p", "https://%F0%9F%98%80@h/p", id="four-byte-code-point"),
+        pytest.param("foo://user@h/p", "foo://user@h/p", id="non-special-plain-kept"),
+        pytest.param("foo://a@b@h/p", "foo://a%40b@h/p", id="non-special-earlier-at-escaped"),
+        pytest.param("foo://a:b:c@h/p", "foo://a:b%3Ac@h/p", id="non-special-second-colon-escaped"),
+        pytest.param("foo://u@h:80/p", "foo://u@h:80/p", id="non-special-port-kept"),
+        pytest.param("foo:x", "foo:x", id="non-special-opaque-kept"),
+        pytest.param("foo:/a/b", "foo:/a/b", id="non-special-path-kept"),
+        pytest.param("foo://u@h?q", "foo://u@h?q", id="non-special-query-ends-authority"),
+        pytest.param("foo://u@h#f", "foo://u@h#f", id="non-special-fragment-ends-authority"),
+        pytest.param("foo://h:80/p", "foo://h:80/p", id="non-special-port-without-userinfo"),
+        pytest.param("foo://u:p@h/p", "foo://u:p@h/p", id="non-special-username-and-password"),
+        pytest.param("foo://u@Host:80/p", "foo://u@Host:80/p", id="non-special-host-case-kept"),
+    ],
+)
+def test_resolve_links_percent_encodes_the_userinfo(href: str, expected: str) -> None:
+    assert _resolved_href(href, _HTTPS) == expected
 
 
 # A tab/CR/LF inside an otherwise-skippable absolute link forces the rejoin urlsplit would strip it in; a character
@@ -1448,3 +2081,22 @@ def _rewrite_reopened_clones(size: int) -> None:
 def test_external_links_keep_the_public_suffix_boundary(base: str, host: str, *, depth: int) -> None:
     href: Final = f"https://{'s.' * depth}{host}/x"
     assert extract_links(f'<a href="{href}">x</a>', f"https://{base}/", external_only=True) == {href}
+
+
+@pytest.mark.parametrize(
+    ("href", "expected"),
+    [
+        pytest.param("ftp://elsewhere\ttest/x", "ftp://elsewheretest/x", id="tab-removed"),
+        pytest.param("ftp://elsewhere\rtest/x", "ftp://elsewheretest/x", id="carriage-return-removed"),
+        pytest.param("ftp://elsewhere\ntest/x", "ftp://elsewheretest/x", id="line-feed-removed"),
+        pytest.param("ftp:elsewhere.test\\\rx", "ftp://elsewhere.test/x", id="carriage-return-in-path-separator"),
+    ],
+)
+def test_resolve_links_removes_newlines_inside_foreign_links(href: str, expected: str) -> None:
+    root = parse_fragment("<a>x</a>")
+    link = root.find("a")
+    assert isinstance(link, Element)
+    link.attrs["href"] = href
+    root.resolve_links(_HTTPS)
+    (resolved,) = root.links()
+    assert resolved.url == expected

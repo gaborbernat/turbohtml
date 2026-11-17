@@ -37,14 +37,25 @@ number of states the pattern compiles to. A counted repeat adds states without l
 keeps many of them live for every character can spend the budget; it then raises :class:`ValueError`, since the values
 left unmatched have no verdict. Lower the repeat counts to stay within it.
 
-The range facets ``minInclusive``, ``maxInclusive``, ``minExclusive`` and ``maxExclusive`` compare a number by value and
-an ``xs:date``, ``xs:dateTime``, ``xs:time`` or ``xs:duration`` by the order XSD 1.0 part 2 gives the type. Years are
-numbered as in XSD 1.1, where 0000 is 1 BCE and -0001 is 2 BCE. That order is partial: a value with a timezone and one
-without are ordered only when they lie more than fourteen hours apart, and two durations only when they compare the same
-way from each of the specification's four reference dates, so ``P1M`` is neither below nor above ``P30D``. A value the
-order does not place against a bound fails the facet, and so does every value when the bound is not itself a value of
-the type. The range facets are not enforced on ``xs:gYear``, ``xs:gYearMonth``, ``xs:gMonth``, ``xs:gMonthDay`` or
-``xs:gDay``: those validate as strings.
+The range facets ``minInclusive``, ``maxInclusive``, ``minExclusive`` and ``maxExclusive`` compare an ``xs:decimal`` or
+an integer type exactly, digit by digit, and an ``xs:float`` or ``xs:double`` by value. An ``xs:date``, ``xs:dateTime``,
+``xs:time`` or ``xs:duration`` is compared by the order XSD 1.0 part 2 gives the type, and an ``xs:gYear``,
+``xs:gYearMonth``, ``xs:gMonth``, ``xs:gMonthDay`` or ``xs:gDay`` by the order XSD 1.1 part 2 gives it: each field it
+leaves out takes its value from 1972-12-31, and a missing day takes the last day of its month. Years are numbered as in
+XSD 1.1, where 0000 is 1 BCE and -0001 is 2 BCE. That order is partial: a value with a timezone and one without are
+ordered only when they lie more than fourteen hours apart, and two durations only when they compare the same way from
+each of the specification's four reference dates, so ``P1M`` is neither below nor above ``P30D``. A value the order does
+not place against a bound fails the facet, and so does every value when the bound is not itself a value of the type. XSD
+1.0 part 2 makes ``NaN`` equal to itself and unordered with every other ``xs:float`` or ``xs:double`` value, so an
+inclusive ``NaN`` bound admits only ``NaN``, and an exclusive ``NaN`` bound admits no value.
+
+An ``xs:any`` particle matches one child element for each occurrence its ``minOccurs`` and ``maxOccurs`` allow, when the
+``namespace`` attribute admits the element's namespace. ``processContents="strict"``, the default, requires a global
+element declaration for the matched element, ``lax`` validates it only when one exists, and ``skip`` does not validate
+it. An ``xs:anyAttribute`` admits an attribute whose namespace its ``namespace`` attribute allows, with the same
+``processContents`` rules. Prefixed attributes match a declaration or wildcard by the namespace their prefix binds. A
+prefix with no declaration in scope leaves the whole name as an attribute in no namespace. The ``xsi:type``,
+``xsi:nil``, ``xsi:schemaLocation`` and ``xsi:noNamespaceSchemaLocation`` are not checked.
 
 Compiling a RELAX NG schema raises :class:`ValueError` for a grammar the RELAX NG specification forbids: a ``<ref>``
 with no ``name`` attribute (section 4.10), a reference cycle whose expansion never passes through an ``element``

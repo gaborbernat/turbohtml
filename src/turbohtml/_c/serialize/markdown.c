@@ -19,6 +19,7 @@
    is invalid markdown. */
 
 #include "serialize/internal.h"
+#include "core/work_steps.h"
 #include "css/cssom/cssom.h"
 
 #include "dom/tree.h"
@@ -132,8 +133,8 @@ typedef struct {
 typedef struct {
     Py_ssize_t number;     /* the next ordered item's number */
     Py_ssize_t sub_indent; /* how far content attached to the last item indents: its marker's width */
-    char bullet;
-    char delimiter; /* what follows an ordered item's number */
+    Py_UCS4 bullet;        /* a code point, since a configured bullet may be non-ASCII */
+    char delimiter;        /* what follows an ordered item's number */
     int ordered;
     int loose;
     int item_seen;          /* an item has opened, so content between items continues it */
@@ -201,6 +202,7 @@ typedef struct {
     int saved_started;
     int saved_line;
     Py_ssize_t saved_line_number_start;
+    Py_ssize_t saved_line_number_checked;
     Py_ssize_t saved_break_start;
     Py_ssize_t saved_break_end;
     int saved_space;
@@ -221,6 +223,7 @@ typedef struct {
     int started;
     int line_has_content;
     Py_ssize_t line_number_start;
+    Py_ssize_t line_number_checked;
     Py_ssize_t break_start;
     Py_ssize_t break_end;
     int space_pending;
@@ -233,7 +236,7 @@ typedef struct {
     int g_italic;
     int inline_only;
     int deep_block_span;
-    char list_end_marker;
+    Py_UCS4 list_end_marker;
     Py_ssize_t table_end;
 } md_converting;
 
@@ -311,6 +314,7 @@ typedef struct {
     int started;          /* has any block content been emitted yet */
     int line_has_content; /* real content past the prefix/marker on the current line */
     Py_ssize_t line_number_start;
+    Py_ssize_t line_number_checked; /* digits up to here are verified as the run line_number_start opens */
     Py_ssize_t line_start;
     Py_ssize_t line_checked;
     int space_pending;          /* a collapsed-away whitespace run is owed one space */
@@ -334,7 +338,7 @@ typedef struct {
     Py_ssize_t tags_left;       /* the tag characters runs reopened as raw HTML may still add */
     Py_ssize_t list_end;        /* output length when the last list closed, to spot a list right after it */
     Py_ssize_t list_end_prefix; /* the prefix length that list was laid out under */
-    char list_end_marker;       /* its bullet or ordered delimiter; 0 until a list closes */
+    Py_UCS4 list_end_marker;    /* its bullet or ordered delimiter; 0 until a list closes */
     Py_ssize_t table_end;       /* output length when the last pipe table closed, -1 when none ends the output */
     Py_ssize_t table_prefix;    /* the prefix length that table was laid out under */
     Py_ssize_t list_over;       /* output length where a reader is out of that list; behind list_end until then */
@@ -439,6 +443,34 @@ static int md_repeated_br_in_emphasis(md_ctx *ctx, th_node *node) {
    quote, a unicode bullet), decoding its UTF-8 to code points. */
 static void md_puts8(sbuf *out, const char *text) {
     sbuf_put_utf8(out, text, (Py_ssize_t)strlen(text));
+}
+
+/* The first code point of a configured option string, which reads as 0 when it is empty. */
+static Py_UCS4 md_first_cp(const char *text) {
+    Py_ssize_t index = 0;
+    return utf8_next(text, (Py_ssize_t)strlen(text), &index);
+}
+
+/* How many code points a configured option string holds: the bytes that do not continue a sequence. */
+static Py_ssize_t md_cp_len(const char *text) {
+    Py_ssize_t count = 0;
+    for (const char *cursor = text; *cursor != '\0'; cursor++) {
+        count += (*cursor & 0xC0) != 0x80;
+    }
+    return count;
+}
+
+/* The unordered-list marker for a list depth levels deep: the bullets' code points, cycled. */
+static Py_UCS4 md_bullet_at(const char *bullets, Py_ssize_t depth) {
+    if (bullets[1] == '\0') {
+        return (unsigned char)bullets[0];
+    }
+    Py_ssize_t len = (Py_ssize_t)strlen(bullets);
+    Py_ssize_t index = 0;
+    for (Py_ssize_t skip = depth % md_cp_len(bullets); skip > 0; skip--) {
+        utf8_next(bullets, len, &index);
+    }
+    return utf8_next(bullets, len, &index);
 }
 
 /* Indent what follows by count more columns, one list level deeper, and return the
@@ -734,9 +766,9 @@ static int md_marker_html(md_ctx *ctx, Py_ssize_t index, Py_ssize_t first) {
     Py_ssize_t len = ctx->out.len;
     /* an enclosing `*` opened together with this `**` reads as `***`, which nests the
        same way (CommonMark 6.2 rule 14), so only that pairing keeps its delimiters */
-    if (len > 0 && ctx->out.data[len - 1] == (unsigned char)marker->open[0] &&
+    if (len > 0 && ctx->out.data[len - 1] == md_first_cp(marker->open) &&
         !(len >= 2 && ctx->out.data[len - 2] == '\\') &&
-        !(index > first && strlen(ctx->markers[index - 1].open) < strlen(marker->open))) {
+        !(index > first && md_cp_len(ctx->markers[index - 1].open) < md_cp_len(marker->open))) {
         const char *alternate = md_alternate_run(ctx, marker);
         if (alternate == NULL) {
             return 1;
@@ -1099,18 +1131,26 @@ static inline int md_non_ascii_space(Py_UCS4 ch) {
     return Py_UNICODE_ISSPACE(ch); /* GCOVR_EXCL_BR_LINE: ch >= 128 makes the macro's ASCII arm unreachable */
 }
 
+/* Whether every character written since the line's first digit is a digit, the run a line-numbered marker starts in.
+   The scan resumes where the last one stopped, so a run of digits costs its length once and not once per text node
+   written after it. */
+static int md_line_digits_only(md_ctx *ctx) {
+    Py_ssize_t index = ctx->line_number_checked;
+    while (index < ctx->out.len && is_ascii_digit(ctx->out.data[index])) {
+        TH_WORK_STEP();
+        index++;
+    }
+    ctx->line_number_checked = index;
+    return index == ctx->out.len;
+}
+
 static void md_emit_text(md_ctx *ctx, th_node *node, const Py_UCS4 *text, Py_ssize_t len) {
     if (text == NULL && len > 0) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
         ctx->out.failed = 1;       /* GCOVR_EXCL_LINE: allocation failure */
         return;                    /* GCOVR_EXCL_LINE: allocation failure */
     }
     if (ctx->line_number_start > 0 && !ctx->space_pending && ctx->pending == NULL) {
-        Py_ssize_t start = ctx->line_number_start - 1;
-        Py_ssize_t end = ctx->out.len;
-        while (end > start && ctx->out.data[end - 1] >= '0' && ctx->out.data[end - 1] <= '9') {
-            end--;
-        }
-        if (end == start) {
+        if (md_line_digits_only(ctx)) {
             Py_ssize_t scan = 0;
             while (scan < len && text[scan] >= '0' && text[scan] <= '9') {
                 scan++;
@@ -1165,6 +1205,7 @@ static void md_emit_text(md_ctx *ctx, th_node *node, const Py_UCS4 *text, Py_ssi
                 continue;
             }
             ctx->line_number_start = ctx->out.len + 1;
+            ctx->line_number_checked = ctx->out.len;
         }
         int by_context = ((kind & MD_CH_CONTEXT) || (translit && ch == 0x2190)) && ctx->escape_prose &&
                          md_escape_in_text(ctx, text, index, len);
@@ -1582,6 +1623,8 @@ static void md_rewrite_open(md_ctx *ctx, md_marker *marker) {
     /* the wrap column rescans the line from the last newline */
     ctx->line_start = 0;
     ctx->line_checked = 0;
+    /* the shift can put markup inside the digit run, so the run is checked again from its start */
+    ctx->line_number_checked = ctx->line_number_start - 1;
     marker->open = open;
     marker->open_len = open_len + shift;
     marker->close = MD_HTML_TAGS[marker->html - 1][1];
@@ -1636,8 +1679,8 @@ static void md_settle_run(md_ctx *ctx, Py_ssize_t index, th_node *node) {
     int settled = md_run_opens(before, after, star);
     for (Py_ssize_t outer = ctx->marker_base; settled && outer < index; outer++) {
         /* an enclosing run written into this same delimiter run opens with it instead */
-        settled = !(ctx->markers[outer].open[0] == marker->open[0] && ctx->markers[outer].open_at < run_start &&
-                    md_run_closes(before, after, star));
+        settled = !(md_first_cp(ctx->markers[outer].open) == md_first_cp(marker->open) &&
+                    ctx->markers[outer].open_at < run_start && md_run_closes(before, after, star));
     }
     if (settled) {
         Py_ssize_t last = close_at - 1;
@@ -2076,6 +2119,10 @@ static const uint8_t MD_URL[128] = {
     [0x1f] = MD_URL_ANGLE, [0x7f] = MD_URL_ANGLE,
 };
 
+static int md_space_in_run(const Py_UCS4 *text, Py_ssize_t len, Py_ssize_t index) {
+    return (index > 0 && text[index - 1] == ' ') || (index + 1 < len && text[index + 1] == ' ');
+}
+
 /* Write a link destination (CommonMark 6.3) after an optional base prefix. A bare
    destination cannot hold a space or an ASCII control character or start with `<`,
    and takes parentheses only in balanced pairs; anything else goes in the `<...>`
@@ -2119,6 +2166,10 @@ static void md_emit_url(md_ctx *ctx, const char *base, const Py_UCS4 *url, Py_ss
     for (Py_ssize_t index = 0; index < len; index++) {
         TH_WORK_STEP();
         Py_UCS4 ch = url[index];
+        if (ctx->in_cell && ch == ' ' && md_space_in_run(url, len, index)) {
+            sbuf_puts(&ctx->out, "&#32;");
+            continue;
+        }
         int bracket = ch == '<' || (angle ? ch == '>' : unbalanced && (ch == '(' || ch == ')'));
         if (bracket || ch == '\\' || (ch == '&' && md_starts_reference(url, index, len))) {
             sbuf_putc(&ctx->out, '\\');
@@ -2154,12 +2205,17 @@ static void md_emit_url_without_breaks(md_ctx *ctx, const char *base, const Py_U
    escapes it: a reader that does not take the link reads the title as running text,
    where that `<` would open raw HTML. A line break is written as its numeric
    reference, which a title decodes (CommonMark 6.3): written raw, the next line could
-   open a block (a `>` quote, a `#` heading) and end the paragraph mid-link. */
+   open a block (a `>` quote, a `#` heading) and end the paragraph mid-link. A cell's
+   copy-out collapses a space run, so a space in one is a reference too (CommonMark 2.5). */
 static void md_emit_title(md_ctx *ctx, const Py_UCS4 *title, Py_ssize_t len) {
     for (Py_ssize_t index = 0; index < len; index++) {
         TH_WORK_STEP();
         if (title[index] == '\n' || title[index] == '\r') {
             sbuf_puts(&ctx->out, title[index] == '\n' ? "&#10;" : "&#13;");
+            continue;
+        }
+        if (ctx->in_cell && title[index] == ' ' && md_space_in_run(title, len, index)) {
+            sbuf_puts(&ctx->out, "&#32;");
             continue;
         }
         if (title[index] == '"' || title[index] == '\\' ||
@@ -3494,6 +3550,7 @@ static int md_enter_converter(md_ctx *ctx, th_node *node) {
         .started = ctx->started,
         .line_has_content = ctx->line_has_content,
         .line_number_start = ctx->line_number_start,
+        .line_number_checked = ctx->line_number_checked,
         .break_start = ctx->break_start,
         .break_end = ctx->break_end,
         .space_pending = ctx->space_pending,
@@ -3637,6 +3694,7 @@ static void md_leave_converter(md_ctx *ctx, md_frame *frame) {
     ctx->started = saved->started;
     ctx->line_has_content = saved->line_has_content;
     ctx->line_number_start = saved->line_number_start;
+    ctx->line_number_checked = saved->line_number_checked;
     ctx->break_start = saved->break_start;
     ctx->break_end = saved->break_end;
     ctx->line_start = saved->line_start;
@@ -3919,7 +3977,7 @@ static void md_render_item(md_ctx *ctx, th_node *child, md_list_state *state) {
         sbuf_putc(&ctx->out, ' ');
         state->number++;
     } else {
-        sbuf_putc(&ctx->out, (Py_UCS4)(unsigned char)state->bullet);
+        sbuf_putc(&ctx->out, state->bullet);
         sbuf_putc(&ctx->out, ' ');
         width = lead + 2;
     }
@@ -4073,7 +4131,41 @@ static TH_NOINLINE th_node *md_list_first_item(th_node *list) {
     return item != NULL && item->ns == TH_NS_HTML && item->atom == TH_TAG_LI ? item : NULL;
 }
 
+/* Whether a container under parent needs more indent levels than the prefix can hold, so a block there would sit
+   outside its own column. An item adds two levels and a block quote one; a child of a list that is not an item is
+   indented by two more (md_list_child). Past TH_MAX_INDENT_LEVELS the prefix stops growing, so the outermost
+   container that does not fit is written as one raw HTML block instead. */
+static int md_nesting_exceeds(th_node *parent, int in_list, int room) {
+    for (th_node *child = parent->first_child; child != NULL; child = child->next_sibling) {
+        TH_WORK_STEP();
+        int step = in_list ? 2 : 0;
+        int child_in_list = 0;
+        if (child->type == TH_NODE_ELEMENT && child->ns == TH_NS_HTML) {
+            if (child->atom == TH_TAG_LI) {
+                step = 2;
+            } else if (child->atom == TH_TAG_BLOCKQUOTE) {
+                step += 1;
+            } else if (child->atom == TH_TAG_UL || child->atom == TH_TAG_OL || child->atom == TH_TAG_MENU) {
+                child_in_list = 1;
+            } else if (in_list && md_is_item_wrapper(child)) {
+                step = 0;
+                child_in_list = in_list;
+            }
+        }
+        if (step > room || (child->first_child != NULL && md_nesting_exceeds(child, child_in_list, room - step))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void md_enter_list(md_ctx *ctx, th_node *node) {
+    /* a top container that fits holds every container under it within the cap, so only the outermost one walks */
+    if (ctx->indent_levels == 0 && md_nesting_exceeds(node, 1, TH_MAX_INDENT_LEVELS)) {
+        md_block_line(ctx, 0);
+        md_emit_raw_html(ctx, node);
+        return;
+    }
     int ordered = md_list_ordered(ctx, node);
     Py_ssize_t number = ordered ? md_list_number_attr(ctx, node, "start", 1) : 1;
     int preserve_ordinals = node->atom == TH_TAG_OL && ctx->opt->raw_list_html;
@@ -4084,11 +4176,6 @@ static void md_enter_list(md_ctx *ctx, th_node *node) {
         raw_html = 0;
         loose = md_list_layout(ctx, node, 0, &raw_html);
     }
-    if (ctx->indent_levels >= TH_MAX_INDENT_LEVELS - 1 && loose && md_list_raw_safe(ctx->tree, node)) {
-        md_block_line(ctx, 0);
-        md_emit_raw_html(ctx, node);
-        return;
-    }
     if (raw_html) {
         md_block_line(ctx, 1);
         md_emit_raw_html(ctx, node);
@@ -4098,10 +4185,9 @@ static void md_enter_list(md_ctx *ctx, th_node *node) {
     if (checked_item != NULL && md_item_cannot_interrupt(ctx, checked_item, ordered, number)) {
         ctx->interrupt_blank = 1;
     }
-    Py_ssize_t bullets_len = (Py_ssize_t)strlen(ctx->opt->bullets);
     md_list_state state = {
         .number = number,
-        .bullet = ctx->opt->bullets[ctx->list_depth % bullets_len],
+        .bullet = md_bullet_at(ctx->opt->bullets, ctx->list_depth),
         .delimiter = '.',
         .ordered = ordered,
         .loose = loose,
@@ -4133,7 +4219,8 @@ static void md_leave_list(md_ctx *ctx, md_frame *frame) {
         /* a list with no items writes nothing, so the one before it stays the neighbor */
         ctx->list_end = ctx->out.len;
         ctx->list_end_prefix = ctx->prefix.len;
-        ctx->list_end_marker = frame->list.state.ordered ? frame->list.state.delimiter : frame->list.state.bullet;
+        ctx->list_end_marker =
+            frame->list.state.ordered ? (Py_UCS4)frame->list.state.delimiter : frame->list.state.bullet;
     }
 }
 
@@ -4319,7 +4406,7 @@ static void md_render_root_item(md_ctx *ctx, th_node *node) {
     }
     md_list_state state = {
         .number = number,
-        .bullet = ctx->opt->bullets[(depth > 0 ? depth - 1 : 0) % (Py_ssize_t)strlen(ctx->opt->bullets)],
+        .bullet = md_bullet_at(ctx->opt->bullets, depth > 0 ? depth - 1 : 0),
         .delimiter = '.',
         .ordered = ordered,
         .loose = md_item_is_loose(ctx, node),
@@ -4339,6 +4426,7 @@ static void md_enter_cell(md_ctx *ctx, md_table *table) {
     table->saved_started = ctx->started;
     table->saved_line = ctx->line_has_content;
     table->saved_line_number_start = ctx->line_number_start;
+    table->saved_line_number_checked = ctx->line_number_checked;
     table->saved_break_start = ctx->break_start;
     table->saved_break_end = ctx->break_end;
     table->saved_space = ctx->space_pending;
@@ -4385,6 +4473,7 @@ static void md_leave_cell(md_ctx *ctx, md_table *table) {
     ctx->started = table->saved_started;
     ctx->line_has_content = table->saved_line;
     ctx->line_number_start = table->saved_line_number_start;
+    ctx->line_number_checked = table->saved_line_number_checked;
     ctx->break_start = table->saved_break_start;
     ctx->break_end = table->saved_break_end;
     ctx->space_pending = table->saved_space;
@@ -5228,6 +5317,11 @@ static void md_render_block(md_ctx *ctx, th_node *node) {
         md_enter_table(ctx, node);
         return;
     case TH_TAG_BLOCKQUOTE: {
+        if (ctx->indent_levels == 0 && md_nesting_exceeds(node, 0, TH_MAX_INDENT_LEVELS - 1)) {
+            md_block_line(ctx, 0);
+            md_emit_raw_html(ctx, node);
+            return;
+        }
         /* the quote opens its lines here rather than through md_block_line, so it closes
            the runs before it (CommonMark 6.2 pairs them within one block) and takes the
            block start an inner block left pending */

@@ -154,7 +154,7 @@ static Py_UCS4 *node_name_string(xp_ctx *ctx, xp_result *args, int argc, Py_ssiz
     if (xp_is_attribute(attr)) {
         Py_ssize_t blen;
         const char *bytes = xp_item_attr_name(ctx->tree, (xp_item){node, attr}, &blen);
-        Py_UCS4 *buffer = ucs4_from_ascii(bytes, blen, len);
+        Py_UCS4 *buffer = ucs4_from_utf8(bytes, blen, len);
         if (buffer == NULL) { /* GCOVR_EXCL_BR_LINE: alloc */
             return NULL;      /* GCOVR_EXCL_LINE */
         }
@@ -2194,6 +2194,17 @@ int eval_function(const xp_program *prog, int32_t idx, xp_ctx *ctx, xp_result *o
     const xp_func_sig *sig = func_signature(fn);
     if (sig != NULL && (argc < sig->min_args || (sig->max_args >= 0 && argc > sig->max_args))) {
         return raise_arity(fn, sig, argc);
+    }
+    if (func_is(fn, "count") && argc == 1 && prog->nodes[fn->first].kind == XN_PATH) {
+        Py_ssize_t selected;
+        int walked = xp_count_walk(prog, fn->first, ctx, &selected);
+        if (walked < 0) {
+            return walked;
+        }
+        if (walked > 0) {
+            result_number(out, (double)selected);
+            return 0;
+        }
     }
     xp_result small_args[3];
     xp_result *args = argc == 0 ? NULL : small_args;

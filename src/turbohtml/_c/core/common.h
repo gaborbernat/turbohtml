@@ -210,8 +210,9 @@ PyObject *turbohtml_url_to_ascii(PyObject *module, PyObject *arg);
 /* Implemented in url/url.c. th_url_host_canonical runs the rest of the WHATWG host parser
    (https://url.spec.whatwg.org/#concept-host-parser) over the bracket-stripped host url_split reports, so two spellings
    of one address compare equal. A host invalid for its form falls back to its lowercased spelling, the advisory
-   behavior normalize_url takes for an unencodable label. The checked IPv6 variant lets clean_url reject an address
-   a browser cannot fetch. NULL only on allocation failure. */
+   behavior normalize_url takes for an unencodable label. The checked variant lets clean_url reject an address
+   a browser cannot fetch: it returns None for an IPv6 literal that does not parse and raises ValueError for a host
+   that fails IDNA or an invalid IPv4 form. NULL with an error set otherwise only on allocation failure. */
 PyObject *th_url_host_canonical(PyObject *host, int kind);
 PyObject *th_url_host_canonical_checked(PyObject *host, int kind);
 
@@ -313,6 +314,12 @@ PyObject *turbohtml_register_feed(PyObject *module, PyObject *args);
 #define TH_BASE_URL_MAX 2048
 PyObject *th_url_resolve(PyObject *base, PyObject *target);
 PyObject *th_document_base_url(PyObject *self, PyObject *fallback);
+PyObject *th_url_base_resolve(PyObject *href, PyObject *fallback);
+PyObject *th_url_base_parse(PyObject *href);
+PyObject *th_url_normalize_base(PyObject *base);
+/* The URL parser's input: `href` without its leading and trailing C0 controls and spaces, and without any tab, LF or
+   CR. A new reference. */
+PyObject *th_url_parser_input(PyObject *href);
 
 /* Implemented in tables.c, the engine behind Element.rows()/records() and Node.tables(). Each takes the wrapping node
    (owner, for the per-tree handle) and the already-derived tree+node the thin C methods in dom/element.c and dom/node.c

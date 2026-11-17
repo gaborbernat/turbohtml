@@ -20,7 +20,7 @@ if TYPE_CHECKING:
         pytest.param("https://www.dwds\t.de/x\n", "https://www.dwds.de/x", id="embedded-tab-and-newline"),
         pytest.param("http:example.org/x", "http://example.org/x", id="host-after-scheme"),
         pytest.param("\x00\x1fhttps://example.org/\x07", "https://example.org/", id="control-characters"),
-        pytest.param("https://exam ple.org/pa th", "https://example.org/path", id="embedded-spaces-removed"),
+        pytest.param("https://example.org/pa th", "https://example.org/pa%20th", id="embedded-space-encoded"),
         pytest.param("<![CDATA[https://www.dwds.de]]>", "https://www.dwds.de/", id="cdata-wrapper"),
         pytest.param('https://example.org/abc"more', "https://example.org/abc", id="quote-truncates"),
         pytest.param("https://example.org/abc<b>x", "https://example.org/abc", id="tag-truncates"),
@@ -209,6 +209,20 @@ def test_normalize_keeps_dotless_canonical_host(url: str, expected: str) -> None
         ),
         pytest.param("http://test.org/?lang=&page=2", "de", "http://test.org/?lang=&page=2", id="empty-lang-passes"),
         pytest.param("http://test.org/?lang", "de", "http://test.org/?lang", id="valueless-lang-passes"),
+        pytest.param("http://test.org/%64e/page", "en", None, id="escaped-marker-other-language"),
+        pytest.param(
+            "http://test.org/%44E/page",
+            "de",
+            "http://test.org/%44E/page",
+            id="escaped-marker-same-language",
+        ),
+        pytest.param("http://test.org/en%2Dus/page", "de", None, id="escaped-hyphen-other-language"),
+        pytest.param(
+            "http://test.org/en%2Fus/page",
+            "de",
+            "http://test.org/en%2Fus/page",
+            id="escaped-reserved-literal",
+        ),
     ],
 )
 def test_clean_language_filter(url: str, language: str, expected: str | None) -> None:
@@ -222,6 +236,20 @@ def test_clean_language_filter(url: str, language: str, expected: str | None) ->
         pytest.param("http://en.example.org/x", "http://en.example.org/x", id="language-subdomain-match"),
         pytest.param("http://www.example.org/x", "http://www.example.org/x", id="long-label-ignored"),
         pytest.param("http://vx.example.org/x", "http://vx.example.org/x", id="non-language-label-ignored"),
+        pytest.param("http://DE.example.org/x", None, id="uppercase-label-mismatch"),
+        pytest.param("http://de.example.org./x", None, id="trailing-dot-label-mismatch"),
+        pytest.param("http://%64e.example.org/x", None, id="percent-encoded-label-mismatch"),
+        pytest.param("http://%44%45.example.org/x", None, id="percent-encoded-uppercase-label-mismatch"),
+        pytest.param("http://d%65.example.org/x", None, id="partly-percent-encoded-label-mismatch"),
+        pytest.param("http://de%2Eexample.org/x", None, id="percent-encoded-separator-mismatch"),
+        pytest.param("http://\uff44\uff45.example.org/x", None, id="fullwidth-label-mismatch"),
+        pytest.param("http://de\uff0eexample.org/x", None, id="fullwidth-separator-mismatch"),
+        pytest.param("http://d%C2%ADe.example.org/x", None, id="ignored-soft-hyphen-mismatch"),
+        pytest.param("http://\u017fk.example.org/x", None, id="case-folded-label-other-language"),
+        pytest.param("http://%65n.example.org/x", "http://en.example.org/x", id="percent-encoded-label-match"),
+        pytest.param("http://\uff45n.example.org/x", "http://en.example.org/x", id="fullwidth-label-match"),
+        pytest.param("http://1.2.3.4.5/x", None, id="invalid-ipv4-host"),
+        pytest.param("http://[1::2::3]/x", None, id="invalid-ipv6-host"),
     ],
 )
 def test_clean_strict_checks_language_subdomains(url: str, expected: str | None) -> None:
@@ -344,6 +372,34 @@ def test_clean_drops_a_fragment_key_with_a_lone_surrogate() -> None:
 )
 def test_anchor_attributes_are_read_the_way_html_defines_them(html: str, expected: set[str]) -> None:
     assert extract_links(html, "https://test.com/") == expected
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        pytest.param("https://a b:a b@h.example/p", "https://a%20b:a%20b@h.example/p", id="userinfo-space-encoded"),
+        pytest.param(
+            "https://h.example/a b?q=a b#f g", "https://h.example/a%20b?q=a%20b#f%20g", id="path-query-fragment"
+        ),
+        pytest.param("https://h.example/a\u2028b", "https://h.example/a%E2%80%A8b", id="path-line-separator-encoded"),
+        pytest.param("https://h.example/\u00a0x", "https://h.example/%C2%A0x", id="path-nbsp-encoded"),
+        pytest.param("https://\u4f8b\u2028.jp/p", None, id="host-line-separator-fails"),
+        pytest.param("https://a b.example/p", None, id="host-space-fails"),
+    ],
+)
+def test_clean_encodes_whitespace_the_way_the_url_standard_does(url: str, expected: str | None) -> None:
+    assert clean_url(url) == expected
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://\u4f8b\u2028.jp/p", id="host-line-separator"),
+        pytest.param("https://a b.example/p", id="host-space"),
+    ],
+)
+def test_extract_links_drops_a_host_with_whitespace(url: str) -> None:
+    assert extract_links(f'<a href="{url}">x</a>', "https://site.example/d/") == set()
 
 
 def test_extract_links_keeps_unicode_whitespace_in_base_path() -> None:
@@ -488,9 +544,26 @@ def test_an_unsplittable_base_raises() -> None:
         extract_links('<a href="https://a.example/">x</a>', "http://[::1", external_only=True)
 
 
-def test_a_relative_link_against_an_unsplittable_base_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid IPv6 URL"):
-        extract_links('<a href="p">x</a>', "http://[::1")
+def test_a_relative_link_against_an_unsplittable_base_is_dropped() -> None:
+    assert extract_links('<a href="p">x</a>', "http://[::1") == set()
+
+
+@pytest.mark.parametrize(
+    ("href", "base", "expected"),
+    [
+        pytest.param("x", "http:site.example", {"http://site.example/x"}, id="special-base-without-slashes"),
+        pytest.param("x", "https://h:80/x/./y/..", {"https://h:80/x/x"}, id="base-dot-segments-removed"),
+        pytest.param("x", "https://[h/a", set(), id="unsplittable-base-drops-relative"),
+        pytest.param(
+            "https://h.example/x", "https://[h/a", {"https://h.example/x"}, id="unsplittable-base-keeps-absolute"
+        ),
+        pytest.param("x", "http:", set(), id="special-base-without-host-drops-relative"),
+    ],
+)
+def test_extract_links_resolves_against_a_raw_base_as_the_url_standard_does(
+    href: str, base: str, expected: set[str]
+) -> None:
+    assert extract_links(f'<a href="{href}">x</a>', base) == expected
 
 
 def test_an_unsplittable_relative_link_raises() -> None:

@@ -5,6 +5,9 @@
 #include "dom/nodes.h"
 
 #include <stdbool.h>
+#if defined(__SSE2__) || defined(_M_X64)
+#include <emmintrin.h>
+#endif
 
 #include "encoding/encoding.h"
 #include "encoding/decode.h"
@@ -1117,7 +1120,8 @@ PyDoc_STRVAR(base_url_doc, "base_url(fallback='')\n--\n\n"
                            "<template>, or one that is an SVG or MathML element, is ignored. A base that resolves to\n"
                            "more than 2,048 characters is ignored.\n\n"
                            ":param fallback: the URL the <base href> is resolved against, and the result\n"
-                           "    itself when the document has no <base href>.\n"
+                           "    itself when the document has no <base href>, normalized as the URL standard parses\n"
+                           "    it. A fallback that does not parse is returned as written.\n"
                            ":returns: the document's base URL.");
 
 static bool base_has_forbidden_scheme(PyObject *url) {
@@ -1149,7 +1153,7 @@ static int base_url_removed(Py_UCS4 point) {
     return point == '\t' || point == '\n' || point == '\r';
 }
 
-static PyObject *base_url_input(PyObject *href) {
+PyObject *th_url_parser_input(PyObject *href) {
     Py_ssize_t length = PyUnicode_GET_LENGTH(href);
     int kind = PyUnicode_KIND(href);
     const void *data = PyUnicode_DATA(href);
@@ -1244,27 +1248,10 @@ static th_node *in_document_next(th_node *current, th_node *root) {
     return current == root ? NULL : current->next_sibling;
 }
 
-/* The document's base URL: its first <base href> resolved against `fallback` (a borrowed str), or `fallback` itself
-   when there is none, the href fails URL parsing (HTML spec 2.4.3) or the resolved base is longer than
-   TH_BASE_URL_MAX. Only an HTML base element in the document counts, not an SVG or MathML element named base. The
-   extraction methods share it. */
-PyObject *th_document_base_url(PyObject *self, PyObject *fallback) {
-    PyObject *href = NULL;
-    th_tree *tree = tree_of(self);
-    th_node *root = ((NodeObject *)self)->node;
-    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
-    for (th_node *node = root->first_child; node != NULL; node = in_document_next(node, root)) {
-        if (node->type == TH_NODE_ELEMENT && node->atom == TH_TAG_BASE && node->ns == TH_NS_HTML &&
-            (href = element_attr_str(tree, node, "href", 4)) != NULL) {
-            break;
-        }
-    }
-    Py_END_CRITICAL_SECTION();
-    if (href == NULL) {
-        return Py_NewRef(fallback); /* no <base href>: the fallback is the base */
-    }
-    PyObject *input = base_url_input(href);
-    Py_DECREF(href);
+/* Parse `href` the way a <base href> is parsed against `fallback`, the base URL used when `href` does not parse. A base
+   resolve_links is given takes the same parse, so its links resolve against the normalized base. */
+PyObject *th_url_base_resolve(PyObject *href, PyObject *fallback) {
+    PyObject *input = th_url_parser_input(href);
     if (input == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         return NULL;     /* GCOVR_EXCL_LINE */
     }
@@ -1286,6 +1273,91 @@ PyObject *th_document_base_url(PyObject *self, PyObject *fallback) {
         Py_SETREF(result, Py_NewRef(fallback));
     }
     Py_DECREF(input);
+    return result;
+}
+
+/* The URL standard's parse of an absolute base, with no HTML base policy applied: NULL with a ValueError when the base
+   does not parse, which a special scheme without a host does not. */
+PyObject *th_url_base_parse(PyObject *href) {
+    PyObject *input = th_url_parser_input(href);
+    if (input == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *empty = PyUnicode_New(0, 0);
+    if (empty == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(input); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *parsed = NULL;
+    if (base_url_missing_special_host(empty, input)) {
+        PyErr_SetString(PyExc_ValueError, "a special scheme needs a host");
+    } else {
+        parsed = th_url_resolve(empty, input);
+    }
+    Py_DECREF(empty);
+    Py_DECREF(input);
+    return parsed;
+}
+
+/* The base a link resolves against, read the way the URL standard parses it: an absolute base that does not parse comes
+   back "", so its links stay as written, and a base over TH_BASE_URL_MAX stays as given. */
+PyObject *th_url_normalize_base(PyObject *base) {
+    PyObject *parsed = th_url_base_parse(base);
+    if (parsed == NULL) {
+        if (!PyErr_ExceptionMatches(PyExc_ValueError)) { /* GCOVR_EXCL_BR_LINE: only allocation can fail here */
+            return NULL;                                 /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        PyErr_Clear();
+        return PyUnicode_New(0, 0);
+    }
+    if (PyUnicode_GET_LENGTH(parsed) > TH_BASE_URL_MAX) {
+        Py_SETREF(parsed, Py_NewRef(base));
+    }
+    return parsed;
+}
+
+/* The fallback as the URL standard parses it, so the no-<base> result and the base a <base href> resolves against are
+   both normalized. A fallback that does not parse stays as written, and TH_BASE_URL_MAX does not apply: the
+   caller's own URL is not limited. */
+static PyObject *fallback_base_url(PyObject *fallback) {
+    PyObject *parsed = th_url_base_parse(fallback);
+    if (parsed != NULL) {
+        return parsed;
+    }
+    if (!PyErr_ExceptionMatches(PyExc_ValueError)) { /* GCOVR_EXCL_BR_LINE: only allocation can fail here */
+        return NULL;                                 /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyErr_Clear();
+    return Py_NewRef(fallback);
+}
+
+/* The document's base URL: its first <base href> resolved against the fallback (a borrowed str, normalized first), or
+   that normalized fallback itself when there is none, the href fails URL parsing (HTML spec 2.4.3) or the resolved base
+   is longer than TH_BASE_URL_MAX. Only an HTML base element in the document counts, not an SVG or MathML element named
+   base. The extraction methods share it. */
+PyObject *th_document_base_url(PyObject *self, PyObject *fallback) {
+    PyObject *href = NULL;
+    th_tree *tree = tree_of(self);
+    th_node *root = ((NodeObject *)self)->node;
+    Py_BEGIN_CRITICAL_SECTION(((NodeObject *)self)->handle);
+    for (th_node *node = root->first_child; node != NULL; node = in_document_next(node, root)) {
+        if (node->type == TH_NODE_ELEMENT && node->atom == TH_TAG_BASE && node->ns == TH_NS_HTML &&
+            (href = element_attr_str(tree, node, "href", 4)) != NULL) {
+            break;
+        }
+    }
+    Py_END_CRITICAL_SECTION();
+    PyObject *base = fallback_base_url(fallback);
+    if (base == NULL) {   /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_XDECREF(href); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    if (href == NULL) {
+        return base; /* no <base href>: the fallback is the base */
+    }
+    PyObject *result = th_url_base_resolve(href, base);
+    Py_DECREF(href);
+    Py_DECREF(base);
     return result;
 }
 
@@ -1726,7 +1798,13 @@ static PyObject *parse_bytes(module_state *state, PyObject *markup, const char *
         const th_encoding_entry *labeled = th_encoding_lookup(enc_arg, enc_len);
         if (labeled == NULL) {
             PyBuffer_Release(&view);
-            PyErr_Format(PyExc_LookupError, "unknown encoding: %s", enc_arg);
+            PyObject *label =
+                PyUnicode_FromStringAndSize(enc_arg, enc_len); /* GCOVR_EXCL_BR_LINE: label is valid UTF-8 */
+            if (label == NULL) {                               /* GCOVR_EXCL_BR_LINE: allocation failure */
+                return NULL;                                   /* GCOVR_EXCL_LINE */
+            }
+            PyErr_Format(PyExc_LookupError, "unknown encoding: %U", label);
+            Py_DECREF(label);
             return NULL;
         }
         if (entry == NULL) {
@@ -2473,6 +2551,140 @@ const char *meta_charset_label(const char *encoding) {
         return "utf-8"; /* serialize() declares this spelling, so encode() and serialize() agree */
     }
     return entry->canonical;
+}
+
+/* Whether any byte lies between lo and hi inclusive. A byte at offset d = byte - lo (mod 256) is in range exactly when
+   d saturating-minus (hi - lo) is zero, so the vector loop keeps the least such value per lane and tests once at the
+   end. The scalar loop covers the tail and every other target. */
+static TH_NOINLINE int bytes_within(const unsigned char *data, Py_ssize_t len, unsigned char lo, unsigned char hi) {
+    Py_ssize_t index = 0;
+#if defined(__SSE2__) || defined(_M_X64)
+    __m128i offset = _mm_set1_epi8((char)lo);
+    __m128i span = _mm_set1_epi8((char)(hi - lo));
+    __m128i least = _mm_set1_epi8((char)0xFF);
+    for (; index + 64 <= len; index += 64) {
+        for (Py_ssize_t lane = 0; lane < 64; lane += 16) {
+            __m128i block = _mm_loadu_si128((const __m128i *)(data + index + lane));
+            least = _mm_min_epu8(least, _mm_subs_epu8(_mm_sub_epi8(block, offset), span));
+        }
+    }
+    if (_mm_movemask_epi8(_mm_cmpeq_epi8(least, _mm_setzero_si128())) != 0) {
+        return 1;
+    }
+#endif
+    for (; index < len; index++) {
+        if (data[index] >= lo && data[index] <= hi) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The byte range a single-byte codec writes differently under the label entry: -1 when no byte disagrees (the codec
+   and the label decode every byte alike), -2 when the codec is not single-byte, otherwise lo << 8 | hi, the least and
+   greatest disagreeing byte. A byte the codec cannot decode (U+FFFD under replace) is never one it writes. Cached by
+   codec name, since the codec's table is fixed for a name; -3 with an exception set on failure. */
+static long single_byte_disagreement(const char *encoding, const th_encoding_entry *entry) {
+    static PyObject *cache = NULL;
+    if (cache == NULL) {
+        cache = PyDict_New();
+        if (cache == NULL) { /* GCOVR_EXCL_BR_LINE: dict allocation cannot be forced from a test */
+            return -3;       /* GCOVR_EXCL_LINE */
+        }
+    }
+    PyObject *key = PyUnicode_FromString(encoding);
+    if (key == NULL) { /* GCOVR_EXCL_BR_LINE: name allocation cannot be forced from a test */
+        return -3;     /* GCOVR_EXCL_LINE */
+    }
+    PyObject *cached = PyDict_GetItemWithError(cache, key);
+    if (cached != NULL) {
+        Py_DECREF(key);
+        return PyLong_AsLong(cached);
+    }
+    unsigned char every[256];
+    for (size_t index = 0; index < sizeof(every); index++) {
+        every[index] = (unsigned char)index;
+    }
+    PyObject *codec = PyUnicode_Decode((const char *)every, sizeof(every), encoding, "replace");
+    if (codec == NULL) { /* GCOVR_EXCL_BR_LINE: the codec decodes every byte with replace */
+        Py_DECREF(key);  /* GCOVR_EXCL_LINE */
+        return -3;       /* GCOVR_EXCL_LINE */
+    }
+    long packed = -1;
+    /* GCOVR_EXCL_START: a single-byte label's codec always decodes every byte, so no test can reach this */
+    if (PyUnicode_GET_LENGTH(codec) != (Py_ssize_t)sizeof(every)) {
+        packed = -2;
+    } else {
+        /* GCOVR_EXCL_STOP */
+        const uint16_t *table = th_sb_index[entry->single];
+        unsigned lo = 256;
+        unsigned hi = 0;
+        for (unsigned index = 0; index < 256; index++) {
+            Py_UCS4 point = PyUnicode_READ_CHAR(codec, (Py_ssize_t)index);
+            if (point != 0xFFFD && table[index] != point) {
+                if (lo > hi) {
+                    lo = index;
+                }
+                hi = index;
+            }
+        }
+        if (lo <= hi) {
+            packed = (long)(lo << 8 | hi);
+        }
+    }
+    Py_DECREF(codec);
+    PyObject *value = PyLong_FromLong(packed);
+    int stored = value == NULL ? -1 : PyDict_SetItem(cache, key, value); /* GCOVR_EXCL_BR_LINE: allocation only */
+    Py_XDECREF(value);
+    Py_DECREF(key);
+    if (stored < 0) { /* GCOVR_EXCL_BR_LINE: the cache insert fails only on allocation */
+        return -3;    /* GCOVR_EXCL_LINE */
+    }
+    return packed;
+}
+
+/* Whether the bytes of a single-byte encoding read back under the single-byte label entry without a difference: 1 when
+   no byte the codec can write decodes differently under the label (so every written character reads back as written),
+   0 when some byte in the output may, -1 with an exception set. The codec's own decoding of each byte is the one a
+   charmap codec's encoder inverts, so a byte the codec writes for a character decodes to that character under it. */
+static int single_byte_bytes_agree(const char *encoding, const th_encoding_entry *entry, const unsigned char *data,
+                                   Py_ssize_t len) {
+    long packed = single_byte_disagreement(encoding, entry);
+    if (packed == -3) { /* GCOVR_EXCL_BR_LINE: the codec or the cache fails only on allocation */
+        return -1;      /* GCOVR_EXCL_LINE */
+    }
+    /* GCOVR_EXCL_START: single_byte_disagreement reports -2 only for a codec that is not single-byte */
+    if (packed == -2) {
+        return 0;
+    }
+    /* GCOVR_EXCL_STOP */
+    if (packed == -1) {
+        return 1;
+    }
+    unsigned lo = (unsigned)(packed >> 8);
+    unsigned hi = (unsigned)(packed & 0xFF);
+    return !bytes_within(data, len, (unsigned char)lo, (unsigned char)hi);
+}
+
+/* Whether the encoded bytes read back as the same text when a reader decodes them with the label charset that
+   meta_charset declared (WHATWG decoder). 1 or 0, or -1 with an exception set. */
+int declaration_reads_back(PyObject *text, PyObject *bytes, const char *encoding, const char *charset) {
+    const th_encoding_entry *entry = th_encoding_lookup(charset, (Py_ssize_t)strlen(charset));
+    const unsigned char *data = (const unsigned char *)PyBytes_AS_STRING(bytes);
+    Py_ssize_t len = PyBytes_GET_SIZE(bytes);
+    if (entry->kind == TH_DEC_SINGLE_BYTE) {
+        int agree = single_byte_bytes_agree(encoding, entry, data, len);
+        if (agree != 0) {
+            return agree;
+        }
+    }
+    PyObject *read = th_decode(entry, data, len);
+    if (read == NULL) { /* GCOVR_EXCL_BR_LINE: the decoder fails only on allocation */
+        return -1;      /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    int same = PyObject_RichCompareBool(read, text, Py_EQ);
+    Py_DECREF(read);
+    return same;
 }
 
 PyObject *turbohtml_parse(PyObject *module, PyObject *args, PyObject *kwargs) {

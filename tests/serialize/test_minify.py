@@ -101,6 +101,12 @@ def test_encode_minify() -> None:
     assert parse("<p>a</p>").encode(options=Html(layout=Minify())) == b"<p>a"
 
 
+@pytest.mark.parametrize("tag", ["script", "style", "xmp", "iframe", "noembed", "noframes"])
+def test_minify_writes_raw_text_carriage_return_as_line_feed(tag: str) -> None:
+    node = Element(tag, children=[Text("a\rb\r\nc")])
+    assert node.serialize(Html(layout=Minify())) == f"<{tag}>a\nb\nc</{tag}>"
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
@@ -1242,6 +1248,9 @@ _NOSCRIPT_DOCUMENTS: Final[list[pytest.ParameterSet]] = [
     pytest.param("<table><tr><td>a  b<noscript><i>c</noscript>d</td></tr></table>", id="table-ancestor"),
     pytest.param("<table><colgroup><noscript><i>c</noscript></table>", id="column-group"),
     pytest.param("<head><noscript><noscript><i>c</noscript></head>", id="nested-in-head"),
+    pytest.param("<span><noscript><frameset></noscript></span>", id="frameset-in-noscript"),
+    pytest.param("<h1><noscript><frameset><x></noscript></h1>", id="frameset-in-noscript-under-heading"),
+    pytest.param("<p>a<noscript><frameset></noscript>", id="frameset-ignored-in-noscript"),
 ]
 _NOSCRIPT_LAYOUTS: Final[list[pytest.ParameterSet]] = [
     pytest.param(Minify(), id="default"),
@@ -1709,3 +1718,90 @@ def test_minify_element_in_no_quirks_tree_omits_end_tag() -> None:
     body: Final = parse("<!DOCTYPE html><body><p>x</p><table></table>").select_one("body")
     assert isinstance(body, Element)
     assert body.serialize(Html(layout=Minify())) == "<body><p>x<table></table></body>"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("<p>x<table><p>c</table>E", id="p-in-p-quirks"),
+        pytest.param("<p><table></p>", id="p-end-in-table"),
+        pytest.param("<p><table><div>", id="block-start-in-p"),
+        pytest.param("<p><table><h1>", id="heading-start-in-p"),
+        pytest.param("<p><table><dt>", id="dt-start-in-p"),
+        pytest.param("<li><table><li>", id="li-in-li"),
+        pytest.param("<dt><table><dt>", id="dt-in-dt"),
+        pytest.param("<h1><table><h1>", id="h1-in-h1"),
+        pytest.param("<a><table><a>", id="a-in-a"),
+        pytest.param("<nobr><table><nobr>", id="nobr-in-nobr"),
+        pytest.param("<button><table><button>", id="button-in-button"),
+        pytest.param("<option><table><option>", id="option-in-option"),
+        pytest.param("<select><table><select>", id="select-in-select"),
+        pytest.param("<select><table><input>", id="input-in-select"),
+    ],
+)
+def test_minify_keeps_a_tree_a_reparse_would_nest_differently(source: str) -> None:
+    # the minified form nests an element inside its own kind, which the reparse closes; the markup comes back as written
+    assert minify(source) == source
+    assert parse(minify(source)).equals(parse(source))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("<ul>\n<li>a\n<ul>\n<li>b\n</ul>\n</ul>", id="list-behind-list"),
+        pytest.param("<p>\na\n<table>\n<td>\n<p>\nb\n</td>\n</table>", id="p-behind-cell"),
+        pytest.param("<a>\n<table>\n<td>\n<a>x</a>\n</td>\n</table>\n</a>", id="a-behind-cell"),
+        pytest.param("<p>\nx\n</p>\n<li>\ny\n</li>", id="sibling-blocks"),
+    ],
+)
+def test_minify_still_minifies_a_nesting_a_reparse_builds(source: str) -> None:
+    # a scope boundary between the two elements, or no element of the kind above the other, keeps the reparse from
+    # closing anything, so the whitespace still folds
+    assert "\n" not in minify(source)
+
+
+def test_minify_of_misnested_formatting_still_minifies() -> None:
+    assert minify("<b><i>x</b></i>\n<p>\n y\n</p>") == "<b><i>x</i></b> <p> y "
+
+
+def test_minify_walks_every_kind_the_nesting_check_reads() -> None:
+    # every element the check classifies sits in one document, so each of its branches runs on a tree that minifies
+    source = (
+        "<div><p>a<h2>b</h2><h3>c</h3><h4>d</h4><h5>e</h5><h6>f</h6><dl><dd>g<dt>h</dt></dl></p>"
+        "<ol><li>i</li></ol><ul><li>j</li></ul><a><nobr>k</nobr></a><button>l</button>"
+        "<select><optgroup><option>m</option></optgroup><input></select>"
+        "<textarea>n</textarea><keygen><svg><title>o</title><desc>p</desc><foreignObject>q</foreignObject></svg>"
+        "<math><mi>r</mi><mo>s</mo><mn>t</mn><ms>u</ms><mtext>v</mtext><annotation-xml>w</annotation-xml></math>"
+        "<table><td><applet>x</applet><object>y</object><marquee>z</marquee><template>x</template></td></table></div>"
+    )
+    assert "<div>" in minify(source)
+
+
+@pytest.mark.parametrize("count", [pytest.param(0, id="short"), pytest.param(80, id="long")])
+def test_minify_keeps_a_heading_nested_past_inline_content(count: int) -> None:
+    # a heading start tag closes only the current node, so the span between the two headings keeps the nesting; the
+    # long page holds more elements than the check's first buffer, so the buffer grows
+    source = f"<h1><span><h2>x</h2></span></h1>{'<b>x</b>' * count}"
+    assert parse(minify(source)).equals(parse(source))
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        pytest.param("<table><tr>c<td>E", id="table-row"),
+        pytest.param("<table><template>c</template>E", id="template"),
+        pytest.param("<p>a<b>b<i>c</b>E", id="formatting"),
+        pytest.param("<noscript><p>c</noscript>E", id="noscript"),
+    ],
+)
+@pytest.mark.parametrize(
+    "depth", [pytest.param(_PARSER_DEPTH + 88, id="deep"), pytest.param(_PARSER_DEPTH * 2, id="x2")]
+)
+def test_minify_past_the_depth_cap_returns_markup_as_written(tail: str, depth: int) -> None:
+    # a node the cap moved has no minified form that reparses to the same tree, so the markup comes back unchanged
+    markup = f"{'<div> ' * depth}{tail}"
+    assert minify(markup) == markup
+
+
+def test_minify_below_the_depth_cap_still_minifies() -> None:
+    assert minify(f"{'<div> ' * (_PARSER_DEPTH - 88)}x") != f"{'<div> ' * (_PARSER_DEPTH - 88)}x"

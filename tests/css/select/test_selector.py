@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import random
 import subprocess  # ruff:ignore[suspicious-subprocess-import]  # runs a fixed argv in a child interpreter
 import sys
 from functools import partial
@@ -10,6 +11,7 @@ import pytest
 
 from turbohtml import Document, Element, Range, SelectorSyntaxError, Text, parse, parse_xml
 from turbohtml.clean import linkify_node
+from turbohtml.convert import css_to_xpath
 from turbohtml.query import Query
 
 if TYPE_CHECKING:
@@ -2562,9 +2564,199 @@ def test_nth_with_an_offset_near_int_min_matches_nothing(pseudo: str, offset: in
         pytest.param("li:nth-child(n-4294967299)", ["1", "2", "3"], id="negative-offset"),
     ],
 )
-def test_nth_integer_beyond_int_range_saturates(selector: str, texts: list[str]) -> None:
+def test_nth_integer_beyond_int_range_matches_formula(selector: str, texts: list[str]) -> None:
     document: Final = parse("<ul><li>1<li>2<li>3</ul>")
     assert [element.text for element in document.select(selector)] == texts
+
+
+@pytest.mark.parametrize(
+    ("selector", "texts"),
+    [
+        pytest.param("li:nth-child(99999999999999999999)", [], id="fixed-index"),
+        pytest.param("li:nth-child(-n+99999999999999999999)", ["1", "2", "3"], id="positive-offset"),
+    ],
+)
+def test_nth_integer_beyond_int64_range_saturates(selector: str, texts: list[str]) -> None:
+    document: Final = parse("<ul><li>1<li>2<li>3</ul>")
+    assert [element.text for element in document.select(selector)] == texts
+
+
+_INT_MAX: Final[int] = 2**31 - 1
+_INT64_MAX: Final[int] = 2**63 - 1
+# step and offset on either side of the int and int64 limits, with each sign mix the An+B parser reads
+_WIDE_STEP_OFFSET: Final[list[pytest.ParameterSet]] = [
+    pytest.param(_INT_MAX, -(_INT_MAX - 1), id="int-max-step"),
+    pytest.param(1, -(2**31), id="unit-step-int-min-offset"),
+    pytest.param(-1, _INT_MAX, id="negative-unit-step-int-max-offset"),
+    pytest.param(3, -(2**31), id="int-min-offset"),
+    pytest.param(3, -_INT_MAX, id="int-max-offset"),
+    pytest.param(-(2**31), 3, id="int-min-step"),
+    pytest.param(2**32 + 2, -(2**32 - 1), id="step-and-offset-past-int-range"),
+    pytest.param(2**32 + 2, 2**31 + 5, id="offset-past-int-max"),
+    pytest.param(3, 2**31 + 5, id="small-step-offset-past-int-max"),
+    pytest.param(0, -(2**31), id="zero-step-int-min-offset"),
+    pytest.param(-(2**32 + 2), 5, id="negative-step-past-int-range"),
+    pytest.param(2, -(_INT_MAX // 2), id="offset-near-half-int-max"),
+    pytest.param(-2, _INT_MAX // 2, id="negative-step-offset-near-half-int-max"),
+    pytest.param(2**62 + 1, -(2**62), id="int64-range-offset"),
+    pytest.param(_INT64_MAX, -(_INT64_MAX - 2), id="int64-max-step"),
+    pytest.param(-_INT64_MAX, _INT64_MAX - 2, id="int64-max-negative-step"),
+    pytest.param(2**70, 1, id="beyond-int64-step"),
+    pytest.param(-(2**70), 2**70, id="beyond-int64-negative-step-offset"),
+    pytest.param(2**62 + 1, 2**62 + 1, id="positive-wide-step-residue-zero"),
+    pytest.param(2**62 + 1, 2**40, id="positive-wide-step-residue-past-int-max"),
+    pytest.param(2**40 + 7, 2**40 + 10, id="positive-wide-step-residue-below-offset"),
+    pytest.param(-(2**62 + 1), 2**62, id="negative-wide-step-residue-past-int-max"),
+    pytest.param(-(2**62 + 1), 2**62 + 1, id="negative-wide-step-residue-zero"),
+    pytest.param(-(2**62 + 1), 2**62 + 6, id="negative-wide-step-residue-in-range"),
+]
+_TWELVE: Final[list[int]] = list(range(1, 13))
+_MARKED: Final[list[int]] = [index for index in _TWELVE if index % 3]
+_MIXED: Final[str] = f"<ul>{''.join(f'<li class=x>{index}' if index % 3 else f'<li>{index}' for index in _TWELVE)}</ul>"
+_CLAUSES: Final[list[pytest.ParameterSet]] = [
+    pytest.param("", _TWELVE, id="all"),
+    pytest.param(" of .x", _MARKED, id="of-class"),
+]
+
+
+@pytest.mark.parametrize("pseudo", ["nth-child", "nth-last-child", "nth-of-type", "nth-last-of-type"])
+@pytest.mark.parametrize(("step", "offset"), _WIDE_STEP_OFFSET)
+def test_an_plus_b_matches_the_formula_for_wide_coefficients(pseudo: str, step: int, offset: int) -> None:
+    expected: Final = _an_plus_b_selected(pseudo, step, offset, _TWELVE)
+    document: Final = parse(_MIXED)
+    assert [int(element.text) for element in document.select(f"li:{pseudo}({step}n{offset:+d})")] == expected
+
+
+def _an_plus_b_selected(pseudo: str, step: int, offset: int, members: list[int]) -> list[int]:
+    last = pseudo.startswith("nth-last")
+    count = len(members)
+    return [
+        member for rank, member in enumerate(members, 1) if _an_plus_b(step, offset, count + 1 - rank if last else rank)
+    ]
+
+
+def _an_plus_b(step: int, offset: int, index: int) -> bool:
+    step, offset = _clamp_int32(step), _clamp_int32(offset)
+    if step == 0:
+        return index == offset
+    difference = index - offset
+    return difference % step == 0 and difference // step >= 0
+
+
+def _clamp_int32(value: int) -> int:
+    # browsers saturate every An+B coefficient to the 32-bit int range before matching
+    return max(-(2**31), min(2**31 - 1, value))
+
+
+@pytest.mark.parametrize(
+    ("step", "offset"),
+    [
+        pytest.param(2**70, 1, id="positive-step-past-int64"),
+        pytest.param(-(2**70), 2**70, id="negative-step-offset-past-int64"),
+    ],
+)
+def test_nth_beyond_int64_range_matches_the_clamped_positions(step: int, offset: int) -> None:
+    document: Final = parse(f"<ul>{''.join(f'<li>{index}' for index in _TWELVE)}</ul>")
+    expected: Final = [str(index) for index in _an_plus_b_selected("nth-child", step, offset, _TWELVE)]
+    assert [element.text for element in document.select(f"li:nth-child({step}n{offset:+d})")] == expected
+
+
+def _huge_pairs() -> list[pytest.ParameterSet]:
+    generator = random.Random(2311)  # ruff:ignore[suspicious-non-cryptographic-random-usage]  # seeded test data, not a secret
+    pairs: list[tuple[int, int]] = []
+    for _ in range(120):
+        step = generator.randrange(10 ** generator.randint(19, 60)) * generator.choice((1, -1))
+        pairs.extend((
+            (step, generator.randrange(-(10**60), 10**60)),
+            (step, generator.randrange(-40, 45) + generator.randint(-3, 3) * step),
+        ))
+    for _ in range(60):
+        step = generator.randint(1, _INT_MAX + 3) * generator.choice((1, -1))
+        pairs.append((step, generator.randrange(-(10**40), 10**40)))
+    return [pytest.param(step, offset, id=f"pair-{index}") for index, (step, offset) in enumerate(pairs)]
+
+
+_FORTY: Final[str] = f"<ul>{''.join(f'<li>{index}' for index in range(1, 41))}</ul>"
+
+
+_RESIDUE_EDGES: Final[list[pytest.ParameterSet]] = [
+    pytest.param(-(2**31), 3, id="int-min-step"),
+    pytest.param(3, -(2**31), id="int-min-offset"),
+    pytest.param(-(2**31), -(2**31), id="int-min-step-and-offset"),
+    pytest.param(-(2**31), 2**31 + 9, id="int-min-step-offset-past-int-max"),
+    pytest.param(10**20 + 7, -(10**20 + 7) + 5, id="wide-step-residue-inside"),
+    pytest.param(10**20 + 7, -(10**20 + 7), id="wide-step-residue-zero"),
+    pytest.param(10**20 + 7, -(10**20 + 7) - 3_000_000_000, id="wide-step-residue-past-int-max"),
+    pytest.param(10**20 + 7, 3_000_000_000, id="wide-step-offset-past-int-max"),
+    pytest.param(-(10**20 + 7), 5, id="negative-wide-step-inside"),
+    pytest.param(2**40, 10**30, id="int64-step-wide-offset"),
+    pytest.param(2**40, -(10**30), id="int64-step-negative-wide-offset"),
+]
+
+
+@pytest.mark.parametrize("pseudo", ["nth-child", "nth-last-child"])
+@pytest.mark.parametrize(("step", "offset"), _RESIDUE_EDGES)
+def test_an_plus_b_residue_edges_match_the_exact_integers(pseudo: str, step: int, offset: int) -> None:
+    members: Final = list(range(1, 41))
+    expected: Final = [str(index) for index in _an_plus_b_selected(pseudo, step, offset, members)]
+    document: Final = parse(_FORTY)
+    assert [element.text for element in document.select(f"li:{pseudo}({step}n{offset:+d})")] == expected
+
+
+@pytest.mark.parametrize("pseudo", ["nth-child", "nth-last-child"])
+@pytest.mark.parametrize(("step", "offset"), _huge_pairs())
+def test_an_plus_b_with_huge_coefficients_matches_the_exact_integers(pseudo: str, step: int, offset: int) -> None:
+    members: Final = list(range(1, 41))
+    expected: Final = [str(index) for index in _an_plus_b_selected(pseudo, step, offset, members)]
+    document: Final = parse(_FORTY)
+    assert [element.text for element in document.select(f"li:{pseudo}({step}n{offset:+d})")] == expected
+
+
+@pytest.mark.parametrize("pseudo", ["nth-child", "nth-last-child"])
+@pytest.mark.parametrize(("clause", "members"), _CLAUSES)
+@pytest.mark.parametrize(("step", "offset"), _WIDE_STEP_OFFSET)
+def test_an_plus_b_of_clause_for_wide_coefficients(
+    pseudo: str, clause: str, members: list[int], step: int, offset: int
+) -> None:
+    expected: Final = _an_plus_b_selected(pseudo, step, offset, members)
+    document: Final = parse(_MIXED)
+    assert [int(element.text) for element in document.select(f"li:{pseudo}({step}n{offset:+d}{clause})")] == expected
+
+
+@pytest.mark.parametrize("pseudo", ["nth-child", "nth-last-child"])
+@pytest.mark.parametrize(("clause", "members"), _CLAUSES)
+@pytest.mark.parametrize(("step", "offset"), _WIDE_STEP_OFFSET)
+def test_css_to_xpath_an_plus_b_for_wide_coefficients(
+    pseudo: str, clause: str, members: list[int], step: int, offset: int
+) -> None:
+    expected: Final = _an_plus_b_selected(pseudo, step, offset, members)
+    nodes: Final = parse(_MIXED).xpath(css_to_xpath(f"li:{pseudo}({step}n{offset:+d}{clause})"))
+    assert isinstance(nodes, list)
+    assert [node.text for node in nodes if isinstance(node, Element)] == [str(index) for index in expected]
+
+
+@pytest.mark.parametrize("pseudo", ["nth-child", "nth-last-child"])
+@pytest.mark.parametrize(("step", "offset"), _WIDE_STEP_OFFSET)
+def test_an_plus_b_matches_and_closest_for_wide_coefficients(pseudo: str, step: int, offset: int) -> None:
+    selector: Final = f"li:{pseudo}({step}n{offset:+d})"
+    expected: Final = [str(index) for index in _an_plus_b_selected(pseudo, step, offset, _TWELVE)]
+    elements: Final = parse(_MIXED).select("li")
+    assert [element.text for element in elements if element.matches(selector)] == expected
+    assert [element.text for element in elements if element.closest(selector) is not None] == expected
+
+
+@pytest.mark.parametrize(("step", "offset"), _WIDE_STEP_OFFSET)
+def test_an_plus_b_of_scope_under_has_for_wide_coefficients(step: int, offset: int) -> None:
+    # 48 siblings give the :has() anchors a run long enough for the sibling sweep to read the :scope clause
+    count: Final = 48
+    document: Final = parse(f"<ul>{''.join(f'<li>{index}' for index in range(1, count + 1))}</ul>")
+    expected: Final = [
+        str(index)
+        for index in range(1, count + 1)
+        if any(_an_plus_b(step, offset, later - index) for later in range(index + 1, count + 1))
+    ]
+    selector: Final = f"li:has(~ li:nth-child({step}n{offset:+d} of :scope ~ *))"
+    assert [element.text for element in document.select(selector)] == expected
 
 
 # 320 characters: past the length from which a class, ~= or *= answer is kept per value for the rest of the query

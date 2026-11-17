@@ -2110,10 +2110,19 @@ def _crossed_places(start: str, combine: str, count: int) -> str:
     )
 
 
-@pytest.mark.parametrize("start", _CROSSED_STARTS)
-def test_rng_crossed_places_past_the_work_limit_raise(start: str) -> None:
-    with pytest.raises(ValueError, match="too ambiguous"):
-        RelaxNG(_crossed_places(start, "group", 11)).validate(parse_xml("<r><v/><v/><v/></r>"))
+@pytest.mark.parametrize(
+    ("start", "tail"),
+    [
+        pytest.param('<ref name="d0"/>', "", id="alone"),
+        pytest.param(
+            '<interleave><ref name="d0"/><element name="a"><empty/></element></interleave>', "<a/>", id="interleaved"
+        ),
+    ],
+)
+def test_rng_crossed_group_places_accept_up_to_their_count(start: str, tail: str) -> None:
+    schema = RelaxNG(_crossed_places(start, "group", 11))
+    assert schema.validate(parse_xml(f"<r>{'<v/>' * 2048}{tail}</r>")).valid
+    assert not schema.validate(parse_xml(f"<r>{'<v/>' * 2049}{tail}</r>")).valid
 
 
 @pytest.mark.parametrize(
@@ -2160,9 +2169,10 @@ def test_rng_repeated_optional_places_below_the_work_limit_decide(xml: str, *, v
     assert rng_ok(rwrap(_OPTIONAL_V * 200), xml) is valid
 
 
-def test_rng_repeated_optional_places_past_the_work_limit_raise() -> None:
-    with pytest.raises(ValueError, match="too ambiguous"):
-        RelaxNG(rwrap(_OPTIONAL_V * 800)).validate(parse_xml("<doc><v/><v/><v/></doc>"))
+def test_rng_repeated_optional_places_accept_up_to_their_count() -> None:
+    schema = RelaxNG(rwrap(_OPTIONAL_V * 800))
+    assert schema.validate(parse_xml(f"<doc>{'<v/>' * 800}</doc>")).valid
+    assert not schema.validate(parse_xml(f"<doc>{'<v/>' * 801}</doc>")).valid
 
 
 @pytest.mark.parametrize(
@@ -2212,15 +2222,453 @@ def test_rng_nested_places_below_the_limit_decide(xml: str, *, valid: bool) -> N
 
 
 @pytest.mark.parametrize(
-    "schema",
+    ("schema", "at_limit", "past_limit"),
     [
-        pytest.param(_nested_places(7, 4), id="many-outer-places"),
-        pytest.param(_nested_places(4, 7), id="many-inner-places"),
+        pytest.param(
+            _nested_places(7, 4),
+            f"<r>{'<a><v/></a>' * 128}</r>",
+            f"<r>{'<a><v/></a>' * 129}</r>",
+            id="many-outer-places",
+        ),
+        pytest.param(
+            _nested_places(4, 7),
+            f"<r><a>{'<v/>' * 128}</a></r>",
+            f"<r><a>{'<v/>' * 129}</a></r>",
+            id="many-inner-places",
+        ),
     ],
 )
-def test_rng_too_many_nested_places_raise(schema: str) -> None:
-    with pytest.raises(ValueError, match="too ambiguous"):
-        RelaxNG(schema).validate(parse_xml('<r><a><v a="2"/></a></r>'))
+def test_rng_nested_places_accept_up_to_their_count(schema: str, at_limit: str, past_limit: str) -> None:
+    assert RelaxNG(schema).validate(parse_xml(at_limit)).valid
+    assert not RelaxNG(schema).validate(parse_xml(past_limit)).valid
+
+
+_DOUBLING_SHAPES: Final[list[pytest.ParameterSet]] = [
+    pytest.param("<group>{r}{r}</group>", lambda depth: 1 << depth, id="group"),
+    pytest.param("<group><group>{r}</group><group>{r}</group></group>", lambda depth: 1 << depth, id="nested-group"),
+    pytest.param("<optional><group>{r}{r}</group></optional>", lambda depth: 1 << depth, id="optional-group"),
+    pytest.param(
+        "<choice><group>{r}{r}</group><group>{r}{r}</group></choice>", lambda depth: 1 << depth, id="choice-of-groups"
+    ),
+]
+_DOUBLED_SHAPES: Final[list[pytest.ParameterSet]] = [
+    *_DOUBLING_SHAPES,
+    pytest.param("<choice>{r}{r}</choice>", lambda _depth: 1, id="choice"),
+    pytest.param("<optional>{r}</optional>", lambda _depth: 1, id="optional"),
+    pytest.param("<oneOrMore>{r}{r}</oneOrMore>", lambda _depth: None, id="one-or-more"),
+    pytest.param("<zeroOrMore>{r}{r}</zeroOrMore>", lambda _depth: None, id="zero-or-more"),
+]
+
+
+@pytest.mark.parametrize(("body", "bound"), _DOUBLED_SHAPES)
+@pytest.mark.parametrize("depth", [1, 2, 3, 4])
+def test_rng_doubled_places_match_their_count(body: str, bound: Callable[[int], int | None], depth: int) -> None:
+    schema = RelaxNG(_doubled_grammar(body, depth))
+    limit = bound(depth)
+    for count in range(2**depth + 2):
+        assert schema.validate(parse_xml(f"<r>{'<e/>' * count}</r>")).valid is (limit is None or count <= limit)
+
+
+def _doubled_grammar(body: str, depth: int) -> str:
+    defines = ['<define name="d0"><optional><element name="e"><empty/></element></optional></define>']
+    for level in range(1, depth + 1):
+        ref = f'<ref name="d{level - 1}"/>'
+        defines.append(f'<define name="d{level}">{body.format(r=ref)}</define>')
+    return rgrammar(f'<start><element name="r"><ref name="d{depth}"/></element></start>{"".join(defines)}')
+
+
+@pytest.mark.parametrize(("body", "bound"), _DOUBLING_SHAPES)
+def test_rng_doubled_places_at_depth_eight_accept_their_count(body: str, bound: Callable[[int], int | None]) -> None:
+    schema = RelaxNG(_doubled_grammar(body, 8))
+    assert bound(8) == 256
+    assert schema.validate(parse_xml(f"<r>{'<e/>' * 256}</r>")).valid
+    assert not schema.validate(parse_xml(f"<r>{'<e/>' * 257}</r>")).valid
+
+
+def test_rng_doubled_group_chain_scales_linearly(work_steps: WorkSteps) -> None:
+    schema = _doubled_grammar("<group>{r}{r}</group>", 10)
+    work_steps.assert_linear(
+        lambda n: partial(RelaxNG(schema).validate, parse_xml(f"<r>{'<e/>' * n}</r>")), (256, 1024)
+    )
+
+
+@pytest.mark.parametrize(("depth", "tail"), [(5, 100), (5, 400), (5, 1000), (7, 100)])
+def test_rng_block_family_validates(depth: int, tail: int) -> None:
+    assert rng_ok(_block_grammar(depth, tail), _blocks(1 << depth, tail))
+
+
+def _block_grammar(depth: int, tail: int, *, distinct: bool = False) -> str:
+    optional = '<optional><element name="{}"><empty/></element></optional>'
+    tail_xml = "".join(optional.format(name) for name in _tail_names(tail, distinct=distinct))
+    defines = [f'<define name="d0"><group>{optional.format("e")}{tail_xml}</group></define>']
+    for level in range(1, depth + 1):
+        ref = f'<ref name="d{level - 1}"/>'
+        defines.append(f'<define name="d{level}"><group>{ref}{ref}</group></define>')
+    return rgrammar(f'<start><element name="r"><ref name="d{depth}"/></element></start>{"".join(defines)}')
+
+
+def _tail_names(tail: int, *, distinct: bool) -> list[str]:
+    # distinct names keep each optional its own run; equal names form one run that a covers check steps over at once
+    return [f"f{index}" for index in range(tail)] if distinct else ["f"] * tail
+
+
+def _blocks(count: int, tail: int, *, distinct: bool = False) -> str:
+    names = "".join(f"<{name}/>" for name in _tail_names(tail, distinct=distinct))
+    return f"<r>{f'<e/>{names}' * count}</r>"
+
+
+@pytest.mark.parametrize("depth", [5, 7])
+def test_rng_block_family_rejects_one_block_too_many(depth: int) -> None:
+    assert not rng_ok(_block_grammar(depth, 200), _blocks((1 << depth) + 1, 200))
+
+
+def test_rng_single_block_of_optionals_validates() -> None:
+    assert rng_ok(_block_grammar(0, 1600), _blocks(1, 1600))
+
+
+def test_rng_block_family_scales_linearly(work_steps: WorkSteps) -> None:
+    def validate(tail: int) -> Callable[[], object]:
+        return partial(RelaxNG(_block_grammar(5, tail)).validate, parse_xml(_blocks(32, tail)))
+
+    work_steps.assert_linear(validate, (200, 800))
+
+
+@pytest.mark.parametrize(("blocks", "valid"), [(32, True), (33, False)])
+def test_rng_block_family_of_distinct_optionals_counts_blocks(blocks: int, *, valid: bool) -> None:
+    assert rng_ok(_block_grammar(5, 200, distinct=True), _blocks(blocks, 50, distinct=True)) is valid
+
+
+def test_rng_block_family_of_distinct_optionals_scales_linearly(work_steps: WorkSteps) -> None:
+    # a block uses a quarter of its optionals, so the unused ones form a long nullable run that each check walks
+    def validate(defined: int) -> Callable[[], object]:
+        schema = RelaxNG(_block_grammar(5, defined, distinct=True))
+        return partial(schema.validate, parse_xml(_blocks(32, defined // 4, distinct=True)))
+
+    work_steps.assert_linear(validate, (200, 800))
+
+
+@pytest.mark.parametrize(("count", "valid_blocks"), [(4, 4), (4, 5), (1, 0)])
+def test_rng_identical_inline_blocks_accept_their_count(count: int, valid_blocks: int) -> None:
+    # the document holds `valid_blocks` blocks, each with one e and tail f, so it fits a schema of `count` blocks
+    # exactly when `valid_blocks` is at most `count`
+    document = _blocks(valid_blocks, 50)
+    assert rng_ok(_inline_blocks(count, 50), document) is (valid_blocks <= count)
+
+
+def _inline_blocks(count: int, tail: int) -> str:
+    # identical blocks written out one by one, so they share a sequence base only through hash-consing
+    optional = '<optional><element name="{}"><empty/></element></optional>'
+    block = f"<group>{optional.format('e')}{optional.format('f') * tail}</group>"
+    return rgrammar(f'<start><element name="r"><group>{block * count}</group></element></start>')
+
+
+def test_rng_identical_inline_blocks_scale_linearly(work_steps: WorkSteps) -> None:
+    def validate(tail: int) -> Callable[[], object]:
+        return partial(RelaxNG(_inline_blocks(4, tail)).validate, parse_xml(_blocks(4, tail)))
+
+    work_steps.assert_linear(validate, (200, 800))
+
+
+@pytest.mark.parametrize(
+    ("document", "valid"), [('<doc a1="1" a7="2">x</doc>', True), ('<doc a9999="1">x</doc>', False)]
+)
+def test_rng_attribute_group_validates_by_name(document: str, *, valid: bool) -> None:
+    assert rng_ok(_optional_attributes(400), document) is valid
+
+
+def _optional_attributes(count: int) -> str:
+    # an attribute-bearing group stays a balanced tree, so its derivatives walk the operands it holds
+    attributes = "".join(f'<optional><attribute name="a{index}"/></optional>' for index in range(count))
+    return rwrap(f"<group>{attributes}<text/></group>")
+
+
+_ANY_OPTIONAL: Final[str] = "<optional><element><anyName/><empty/></element></optional>"
+_CHOICE_OPTIONAL: Final[str] = (
+    "<optional><element><choice><name>a</name><name>b</name></choice><empty/></element></optional>"
+)
+_EXCEPT_OPTIONAL: Final[str] = (
+    "<optional><element><anyName><except><name>x</name></except></anyName><empty/></element></optional>"
+)
+
+
+@pytest.mark.parametrize(
+    ("body", "xml", "valid"),
+    [
+        pytest.param(f"<group>{_ANY_OPTIONAL * 2}</group>", "<doc><a/><b/></doc>", True, id="any-run"),
+        pytest.param(f"<group>{_ANY_OPTIONAL * 2}</group>", "<doc><a/><b/><c/></doc>", False, id="any-run-too-many"),
+        pytest.param(
+            f'<group><optional><element name="a"><empty/></element></optional>{_ANY_OPTIONAL}</group>',
+            "<doc><b/><a/></doc>",
+            False,
+            id="name-then-any-out-of-order",
+        ),
+        pytest.param(
+            f'<group><optional><element name="a"><empty/></element></optional>{_ANY_OPTIONAL}</group>',
+            "<doc><a/><b/></doc>",
+            True,
+            id="name-then-any",
+        ),
+        pytest.param(
+            f"<group>{_CHOICE_OPTIONAL * 2}</group>",
+            "<doc><a/><b/></doc>",
+            True,
+            id="choice-run",
+        ),
+        pytest.param(
+            f"<group>{_CHOICE_OPTIONAL * 2}</group>",
+            "<doc><c/></doc>",
+            False,
+            id="choice-unknown",
+        ),
+        pytest.param(
+            f"<group>{_EXCEPT_OPTIONAL * 2}</group>",
+            "<doc><y/><z/></doc>",
+            True,
+            id="except-run",
+        ),
+        pytest.param(
+            f"<group>{_EXCEPT_OPTIONAL * 2}</group>",
+            "<doc><x/></doc>",
+            False,
+            id="except-excluded",
+        ),
+        pytest.param(
+            '<group><group><optional><element name="a"><empty/></element></optional>'
+            '<element name="b"><empty/></element></group>'
+            '<group><element name="c"><empty/></element></group></group>',
+            "<doc><b/><c/></doc>",
+            True,
+            id="adjacent-sequences",
+        ),
+        pytest.param(
+            '<group><group><optional><element name="a"><empty/></element></optional>'
+            '<element name="b"><empty/></element></group>'
+            '<group><element name="c"><empty/></element></group></group>',
+            "<doc><a/><c/></doc>",
+            False,
+            id="adjacent-sequences-missing",
+        ),
+        pytest.param(
+            '<group><optional><element name="a"><empty/></element></optional>'
+            '<optional><element name="b"><empty/></element></optional></group>',
+            "<doc><a/><b/></doc>",
+            True,
+            id="adjacent-names",
+        ),
+        pytest.param(
+            '<group><empty/><empty/></group><element name="x"><empty/></element>',
+            "<doc><x/></doc>",
+            True,
+            id="empty-group",
+        ),
+        pytest.param(
+            '<group><empty/><element name="a"><empty/></element></group>',
+            "<doc><a/></doc>",
+            True,
+            id="one-operand-group",
+        ),
+        pytest.param(
+            '<group><empty/><element name="a"><empty/></element></group>',
+            "<doc/>",
+            False,
+            id="one-operand-group-missing",
+        ),
+        pytest.param(
+            '<interleave><group><element name="a"><empty/></element><element name="b"><empty/></element></group>'
+            '<element name="c"><empty/></element></interleave>',
+            "<doc><c/><a/><b/></doc>",
+            True,
+            id="interleaved-sequence",
+        ),
+        pytest.param(
+            '<interleave><group><element name="a"><empty/></element><element name="b"><empty/></element></group>'
+            '<element name="c"><empty/></element></interleave>',
+            "<doc><a/><c/></doc>",
+            False,
+            id="interleaved-sequence-missing",
+        ),
+    ],
+)
+def test_rng_adjacent_operands_decide(body: str, xml: str, *, valid: bool) -> None:
+    assert rng_ok(rwrap(body), xml) is valid
+
+
+@pytest.mark.parametrize(
+    ("xml", "valid"),
+    [("<doc><a/><b/><a/><b/></doc>", True), ("<doc><a/><b/></doc>", True), ("<doc><c/></doc>", False)],
+)
+def test_rng_repeated_sequence_with_leading_optional_decides(xml: str, *, valid: bool) -> None:
+    schema = rwrap(
+        '<oneOrMore><group><optional><element name="a"><empty/></element></optional>'
+        '<optional><element name="b"><empty/></element></optional></group></oneOrMore>'
+    )
+    assert rng_ok(schema, xml) is valid
+
+
+@pytest.mark.parametrize(
+    ("xml", "valid"),
+    [
+        ("<doc><e><a/><b/></e></doc>", True),
+        ("<doc><e><b/><a/></e></doc>", True),
+        ("<doc><e><a/><a/></e></doc>", False),
+        ("<doc><e><c/></e></doc>", False),
+    ],
+)
+def test_rng_same_name_sequences_with_other_contents_decide(xml: str, *, valid: bool) -> None:
+    # two optional `e` elements whose contents are sequences in opposite orders: each one's language stays
+    schema = rwrap(
+        "<group>"
+        '<optional><element name="e"><group><optional><element name="a"><empty/></element></optional>'
+        '<optional><element name="b"><empty/></element></optional></group></element></optional>'
+        '<optional><element name="e"><group><optional><element name="b"><empty/></element></optional>'
+        '<optional><element name="a"><empty/></element></optional></group></element></optional>'
+        "</group>"
+    )
+    assert rng_ok(schema, xml) is valid
+
+
+@pytest.mark.parametrize(
+    ("xml", "valid"),
+    [
+        ("<doc><e><c/></e></doc>", True),
+        ("<doc><e><a/><c/></e></doc>", True),
+        ("<doc><e><c/><a/></e></doc>", True),
+        ("<doc><e><a/></e></doc>", False),
+        ("<doc><e/></doc>", False),
+        ("<doc><e><c/><c/></e></doc>", False),
+    ],
+)
+def test_rng_same_name_sequences_with_required_elements_decide(xml: str, *, valid: bool) -> None:
+    # the two contents differ in where their required `c` sits, so neither side's tail is nullable
+    schema = rwrap(
+        "<group>"
+        '<optional><element name="e"><group><optional><element name="a"><empty/></element></optional>'
+        '<element name="c"><empty/></element></group></element></optional>'
+        '<optional><element name="e"><group><element name="c"><empty/></element>'
+        '<optional><element name="a"><empty/></element></optional></group></element></optional>'
+        "</group>"
+    )
+    assert rng_ok(schema, xml) is valid
+
+
+@pytest.mark.parametrize(
+    ("xml", "valid"),
+    [
+        ("<doc><e><a/><b/><c/></e></doc>", True),
+        ("<doc><e><b/><c/></e></doc>", True),
+        ("<doc><e><c/></e></doc>", True),
+        ("<doc><e><a/></e></doc>", False),
+        ("<doc><e><c/><c/></e></doc>", False),
+        ("<doc><e><b/><a/><c/></e></doc>", False),
+    ],
+)
+def test_rng_same_name_sequence_tail_decides(xml: str, *, valid: bool) -> None:
+    # the second content is the tail of the first, built separately, so the first one's run skips to an equal tail
+    schema = rwrap(
+        "<group>"
+        '<optional><element name="e"><group><optional><element name="a"><empty/></element></optional>'
+        '<optional><element name="b"><empty/></element></optional>'
+        '<element name="c"><empty/></element></group></element></optional>'
+        '<optional><element name="e"><group><optional><element name="b"><empty/></element></optional>'
+        '<element name="c"><empty/></element></group></element></optional>'
+        "</group>"
+    )
+    assert rng_ok(schema, xml) is valid
+
+
+@pytest.mark.parametrize(
+    ("xml", "valid"),
+    [
+        ("<doc><e/></doc>", True),
+        ("<doc><e>x</e></doc>", True),
+        ("<doc><e/><e>x</e></doc>", True),
+        ("<doc><e>x</e><e>y</e></doc>", False),
+        ("<doc><f/></doc>", False),
+    ],
+)
+def test_rng_same_name_choice_operand_decides(xml: str, *, valid: bool) -> None:
+    # the second operand opens with two alternatives named `e`, so its derivative is a choice of residuals
+    schema = rwrap(
+        '<group><optional><element name="e"><empty/></element></optional>'
+        '<optional><choice><element name="e"><empty/></element>'
+        '<element name="e"><text/></element></choice></optional></group>'
+    )
+    assert rng_ok(schema, xml) is valid
+
+
+@pytest.mark.parametrize(
+    ("xml", "valid"),
+    [("<doc><a/><b/>x</doc>", True), ("<doc>x<a/><b/></doc>", False), ("<doc><a/>x<b/></doc>", False)],
+)
+def test_rng_text_around_required_operands_decides(xml: str, *, valid: bool) -> None:
+    schema = rwrap('<group><element name="a"><empty/></element><element name="b"><empty/></element><text/></group>')
+    assert rng_ok(schema, xml) is valid
+
+
+@pytest.mark.parametrize(
+    ("xml", "valid"),
+    [
+        ('<r><s/><t x="1"><a/>q</t></r>', True),
+        ('<r><s/><t x="1">q<a/></t></r>', False),
+        ('<r><s/><t x="1"><a/></t></r>', True),
+        ("<r><s/><t><a/>q</t></r>", False),
+    ],
+)
+def test_rng_text_around_required_attribute_group_decides(xml: str, *, valid: bool) -> None:
+    schema = rgrammar(
+        '<start><element name="r"><group><element name="s"><empty/></element>'
+        '<element name="t"><group><attribute name="x"/><element name="a"><empty/></element><text/></group>'
+        "</element></group></element></start>"
+    )
+    assert rng_ok(schema, xml) is valid
+
+
+@pytest.mark.parametrize(
+    ("xml", "valid"),
+    [("<doc>q</doc>", True), ('<doc x="1"><a/>q</doc>', True), ("<doc>q<a/></doc>", False), ("<doc><a/></doc>", True)],
+)
+def test_rng_text_after_nullable_element_in_attribute_group_decides(xml: str, *, valid: bool) -> None:
+    schema = rwrap(
+        '<group><optional><element name="a"><empty/></element></optional>'
+        '<optional><attribute name="x"/></optional><text/></group>'
+    )
+    assert rng_ok(schema, xml) is valid
+
+
+@pytest.mark.parametrize(
+    ("xml", "valid"), [("<doc>q</doc>", True), ('<doc x="1">q</doc>', True), ('<doc y="1">q</doc>', False)]
+)
+def test_rng_text_after_optional_attribute_decides(xml: str, *, valid: bool) -> None:
+    assert rng_ok(rwrap('<group><optional><attribute name="x"/></optional><text/></group>'), xml) is valid
+
+
+@pytest.mark.parametrize(("xml", "valid"), [("<doc><c/><a/><b/></doc>", True), ("<doc><c/><a/></doc>", False)])
+def test_rng_sequence_define_in_interleave_decides(xml: str, *, valid: bool) -> None:
+    schema = rgrammar(
+        '<start><element name="doc"><interleave><ref name="g"/><element name="c"><empty/></element></interleave>'
+        "</element></start>"
+        '<define name="g"><group><element name="a"><empty/></element>'
+        '<element name="b"><empty/></element></group></define>'
+    )
+    assert rng_ok(schema, xml) is valid
+
+
+def test_rng_attribute_group_scales_linearly(work_steps: WorkSteps) -> None:
+    def validate(count: int) -> Callable[[], object]:
+        return partial(RelaxNG(_optional_attributes(count)).validate, parse_xml(f'<doc a{count - 1}="1">x</doc>'))
+
+    work_steps.assert_linear(validate, (200, 800))
+
+
+def test_rng_wide_text_group_scales_linearly(work_steps: WorkSteps) -> None:
+    def validate(count: int) -> Callable[[], object]:
+        values = "".join(
+            f'<optional><data type="token"><param name="maxLength">{index + 1}</param></data></optional>'
+            for index in range(count)
+        )
+        return partial(RelaxNG(rwrap(f"<group>{values}</group>")).validate, parse_xml("<doc>x</doc>"))
+
+    work_steps.assert_linear(validate, (200, 800))
 
 
 def test_rng_too_many_nested_places_scale_linearly(work_steps: WorkSteps) -> None:
@@ -3350,6 +3798,44 @@ def test_rng_numeric_bound_nan(facet: str) -> None:
         ),
         pytest.param("double", '<param name="maxInclusive">1</param>', "1e0", True, id="exponent-equal"),
         pytest.param("double", '<param name="maxInclusive">1</param>', " 0.5 ", True, id="normalized-space"),
+        pytest.param("double", '<param name="minInclusive">NaN</param>', "NaN", True, id="nan-bound-nan-value"),
+        pytest.param("double", '<param name="maxInclusive">NaN</param>', "NaN", True, id="nan-max-bound-nan-value"),
+        pytest.param("double", '<param name="minExclusive">NaN</param>', "NaN", False, id="nan-exclusive-bound"),
+        pytest.param(
+            "double",
+            '<param name="minInclusive">NaN</param><param name="maxInclusive">5</param>',
+            "NaN",
+            False,
+            id="nan-bound-and-finite-bound",
+        ),
+        pytest.param(
+            "decimal",
+            '<param name="minInclusive">0</param>',
+            f"-0.{'0' * 400}1",
+            False,
+            id="decimal-tiny-negative-below-zero",
+        ),
+        pytest.param(
+            "decimal",
+            '<param name="maxInclusive">0</param>',
+            f"0.{'0' * 400}1",
+            False,
+            id="decimal-tiny-positive-above-zero",
+        ),
+        pytest.param(
+            "decimal",
+            f'<param name="maxInclusive">{"9" * 400}</param>',
+            f"1{'0' * 400}",
+            False,
+            id="decimal-overflow-above-bound",
+        ),
+        pytest.param(
+            "integer",
+            '<param name="maxInclusive">9007199254740992</param>',
+            "9007199254740993",
+            False,
+            id="integer-past-double-above-bound",
+        ),
         pytest.param(
             "date",
             '<param name="maxExclusive">2024-12-31</param>',
@@ -3597,15 +4083,14 @@ def _routed_chain(depth: int) -> str:
     return grammar(start + "".join(defs))
 
 
-def test_rng_small_schema_nested_places_raise() -> None:
+def test_rng_small_schema_nested_repeats_validate() -> None:
     schema = RelaxNG(
         grammar(
             '<start><ref name="x"/></start><define name="x"><element name="a">'
             '<zeroOrMore><ref name="x"/></zeroOrMore><zeroOrMore><ref name="x"/></zeroOrMore></element></define>'
         )
     )
-    with pytest.raises(ValueError, match="too ambiguous"):
-        schema.validate(parse_xml("<a>" * 12 + "</a>" * 12))
+    assert schema.validate(parse_xml("<a>" * 12 + "</a>" * 12)).valid
 
 
 @cache
@@ -4044,6 +4529,19 @@ def test_rng_routed_derivatives_decide_like_the_walk(
     schema: Final = RelaxNG(grammar(f'<start><element name="doc">{_WARM_UP}{pattern}</element></start>{defines}'))
     verdicts: Final = [schema.is_valid(parse_xml(f"<doc>{warm}{content}</doc>")) for warm in ("", _WARM_CHILDREN)]
     assert verdicts == [expected, expected]
+
+
+@pytest.mark.parametrize(
+    ("content", "valid"),
+    [("x<b/>", True), ("<b/>", True), ("<b/>x", False)],
+)
+def test_rng_empty_right_range_continuation_decides(content: str, *, valid: bool) -> None:
+    # the element's join has an empty right range, so the text group past it still decides the element
+    schema: Final = RelaxNG(
+        grammar(f'<start><element name="doc">{_WARM_UP}{_TEXT_REFERENCES}</element></start>{_TEXT_DEFINES}')
+    )
+    verdicts: Final = [schema.is_valid(parse_xml(f"<doc>{warm}{content}</doc>")) for warm in ("", _WARM_CHILDREN)]
+    assert verdicts == [valid, valid]
 
 
 _X: Final[str] = '<element name="x{}"><empty/></element>'

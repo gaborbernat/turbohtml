@@ -17,6 +17,7 @@
 #include "tokenizer/binding.h" /* Py_BEGIN_CRITICAL_SECTION shim for the GIL/pre-3.13 build */
 #include "dom/nodes.h"
 #include "dom/tree.h"
+#include "url/url.h"
 
 #include <string.h>
 
@@ -706,12 +707,278 @@ static int splice_value(link_walk *walk, th_node *target, const char *attr_name,
     return status;
 }
 
+/* Whether the scheme value[start,end) is the ASCII name `name` (lowercase, as the reference parser writes it). */
+static int url_scheme_is(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t end, const char *name) {
+    Py_ssize_t length = (Py_ssize_t)strlen(name);
+    if (end - start != length) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < length; index++) {
+        if (value[start + index] != (Py_UCS4)(unsigned char)name[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Whether the authority of the special-scheme reference value[start,end) ends in a port the WHATWG parser drops: an
+   empty port, or the default port of its scheme (https://url.spec.whatwg.org/#port-state). `colon` is its scheme's
+   colon and `stop` the end of the authority. */
+static int url_drops_port(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t colon, Py_ssize_t stop) {
+    Py_ssize_t digits = stop;
+    while ((Py_UCS4)(value[digits - 1] - '0') < 10) {
+        digits--;
+    }
+    if (value[digits - 1] != ':') {
+        return 0;
+    }
+    long def;
+    if (url_scheme_is(value, start, colon, "http") || url_scheme_is(value, start, colon, "ws")) {
+        def = 80;
+    } else if (url_scheme_is(value, start, colon, "https") || url_scheme_is(value, start, colon, "wss")) {
+        def = 443;
+    } else if (url_scheme_is(value, start, colon, "ftp")) {
+        def = 21;
+    } else {
+        return 0;
+    }
+    if (digits == stop) {
+        return 1;
+    }
+    if (stop - digits > 1 && value[digits] == '0') {
+        return 1;
+    }
+    long port = 0;
+    for (Py_ssize_t index = digits; index < stop; index++) {
+        port = port * 10 + (value[index] - '0');
+        if (port > 65535) {
+            port = 65536;
+        }
+    }
+    return port == def;
+}
+
+/* Whether the path value[from,end) (up to a '?' or '#') has a segment that is a single- or double-dot segment, with %2e
+   in any case counting as a dot (https://url.spec.whatwg.org/#single-dot-path-segment). */
+static int url_path_has_dot_segment(const Py_UCS4 *value, Py_ssize_t from, Py_ssize_t end) {
+    for (Py_ssize_t index = from; index + 1 < end && value[index] != '?' && value[index] != '#'; index++) {
+        if (value[index] != '/') {
+            continue;
+        }
+        Py_ssize_t segment = index + 1;
+        if (value[segment] != '.' && value[segment] != '%') {
+            continue;
+        }
+        Py_ssize_t stop = segment;
+        while (stop < end && value[stop] != '/' && value[stop] != '?' && value[stop] != '#') {
+            stop++;
+        }
+        int dots = 0;
+        Py_ssize_t cursor = segment;
+        while (cursor < stop && dots <= 2) {
+            if (value[cursor] == '.') {
+                cursor++;
+            } else if (cursor + 2 < stop && value[cursor] == '%' && value[cursor + 1] == '2' &&
+                       (value[cursor + 2] | 0x20) == 'e') {
+                cursor += 3;
+            } else {
+                break;
+            }
+            dots++;
+        }
+        if (cursor == stop && dots <= 2) {
+            return 1;
+        }
+        index = stop - 1;
+    }
+    return 0;
+}
+
+/* The first index of `target` (an ASCII character) in value[start,end), or -1. memchr finds candidate bytes; each is
+   checked against its character, since a byte of a wider character can equal `target`. */
+static Py_ssize_t url_find_char(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t end, Py_UCS4 target) {
+    const unsigned char *bytes = (const unsigned char *)(value + start);
+    Py_ssize_t length = (end - start) * (Py_ssize_t)sizeof(Py_UCS4);
+    Py_ssize_t offset = 0;
+    while (offset < length) {
+        const unsigned char *hit = memchr(bytes + offset, (int)target, (size_t)(length - offset));
+        if (hit == NULL) {
+            return -1;
+        }
+        Py_ssize_t index = start + (Py_ssize_t)(hit - bytes) / (Py_ssize_t)sizeof(Py_UCS4);
+        if (value[index] == target) {
+            return index;
+        }
+        offset = (index - start + 1) * (Py_ssize_t)sizeof(Py_UCS4);
+    }
+    return -1;
+}
+
+/* Whether a '.' or '%' that follows a '/' in value[from,end) starts a dot segment; only such a '/' reaches the segment
+   check, so a path without a '/' costs one memchr scan. */
+static int url_path_has_dot_candidate(const Py_UCS4 *value, Py_ssize_t from, Py_ssize_t end) {
+    Py_ssize_t at = from;
+    while ((at = url_find_char(value, at, end, '/')) >= 0) {
+        if (at + 1 < end && (value[at + 1] == '.' || value[at + 1] == '%') &&
+            url_path_has_dot_segment(value, from, end)) {
+            return 1;
+        }
+        at++;
+    }
+    return 0;
+}
+
+/* Whether the absolute special-scheme reference value[start,end), whose scheme ends at `colon`, is written as the link
+   join would write it: an authority with no upper-case letter in its host (the userinfo before '@' is kept as written),
+   no tab, CR or LF, a port that is not dropped, a host that cannot read as an IPv4 address, and a path with no tab, CR,
+   LF, backslash or dot segment. The host and port are one pass over the authority; the path is memchr scans, each run
+   only when its byte occurs. */
+/* Whether an authority code point is percent-encoded in the userinfo the URL parser writes (a C0 control, a space, DEL,
+   a non-ASCII code point, or one of " < > ` { } [ ] ^ | ; = \\), so a link holding one is joined rather than kept. */
+static int url_authority_char_escapes(Py_UCS4 c) {
+    return c <= 0x20 || c > 0x7E || strchr("\"<>`{}[]^|;=\\", (int)c) != NULL;
+}
+
+/* Whether the authority after "//" at start, read up to a '/', '?' or '#', holds a code point the URL parser escapes in
+   its userinfo, or a second '@' or a second ':' before the '@' (so the userinfo is not the one a browser reads). */
+static int url_authority_escapes(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t end) {
+    if (end - start < 2 || value[start] != '/' || value[start + 1] != '/') {
+        return 0;
+    }
+    int at_seen = 0;
+    int colons = 0;
+    for (Py_ssize_t index = start + 2; index < end; index++) {
+        Py_UCS4 c = value[index];
+        if (c == '/' || c == '?' || c == '#') {
+            break;
+        }
+        if (url_authority_char_escapes(c)) {
+            return 1;
+        }
+        if (c == '@') {
+            if (at_seen) {
+                return 1;
+            }
+            at_seen = 1;
+            colons = 0;
+        } else if (c == ':' && !at_seen && ++colons > 1) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether value[start,end) holds a code point the URL standard percent-encodes in a path, query or fragment: a C0
+   control or space, DEL, or any non-ASCII code point. A reference holding one takes the join, which encodes it. */
+static int url_path_needs_encoding(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t end) {
+    for (Py_ssize_t index = start; index < end; index++) {
+        if (value[index] <= 0x20 || value[index] >= 0x7F) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int url_special_text_plain(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t colon, Py_ssize_t end) {
+    Py_ssize_t stop = colon + 3;
+    Py_ssize_t host = stop;
+    Py_ssize_t last_colon = -1;
+    int upper = 0;
+    int escaped = 0;
+    int at_seen = 0;
+    int colons = 0;
+    for (; stop < end; stop++) {
+        Py_UCS4 c = value[stop];
+        if (c == '/' || c == '?' || c == '#' || c == '\\') {
+            break;
+        }
+        if (c == '\t' || c == '\r' || c == '\n') {
+            return 0;
+        }
+        if (url_authority_char_escapes(c)) {
+            return 0;
+        }
+        if (c == '@') {
+            if (at_seen) {
+                return 0;
+            }
+            at_seen = 1;
+            colons = 0;
+            upper = 0;
+            escaped = 0;
+            last_colon = -1;
+            host = stop + 1;
+        } else if (c == ':') {
+            last_colon = stop;
+            if (!at_seen && ++colons > 1) {
+                return 0;
+            }
+        } else {
+            upper |= c >= 'A' && c <= 'Z';
+            escaped |= c == '%' || c >= 0x80;
+        }
+    }
+    if (upper || escaped) {
+        return 0;
+    }
+    if (last_colon >= 0 && url_drops_port(value, start, colon, stop)) {
+        return 0;
+    }
+    if (th_url_host_may_end_in_number(value, host, last_colon >= 0 ? last_colon : stop)) {
+        return 0;
+    }
+    if (stop == end || value[stop] != '/') {
+        return 0;
+    }
+    if (url_path_needs_encoding(value, stop, end) || url_find_char(value, stop, end, '\\') >= 0) {
+        return 0;
+    }
+    return !url_path_has_dot_candidate(value, stop, end);
+}
+
+static int url_scheme_is_file(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t colon) {
+    static const char name[] = "file";
+    if (colon - start != 4) {
+        return 0;
+    }
+    for (Py_ssize_t index = 0; index < 4; index++) {
+        if (lower_ascii(value[start + index]) != (Py_UCS4)(unsigned char)name[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Whether the absolute special-scheme reference from `start` reads the same in the link join as it is written: a
+   lowercase scheme other than file, two slashes and a host, and the authority and path checks of
+   url_special_text_plain. Any other form (no slashes, one slash, an empty authority, an upper-case scheme, a file URL,
+   whose host and empty path the URL standard rewrites) takes the join, which reads the host and separators as WHATWG
+   does. */
+static int url_special_link_plain(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t colon, Py_ssize_t end) {
+    if (url_scheme_is_file(value, start, colon) || colon + 3 >= end || value[colon + 1] != '/' ||
+        value[colon + 2] != '/') {
+        return 0;
+    }
+    Py_UCS4 host = value[colon + 3];
+    if (host == '/' || host == '\\' || host == '?' || host == '#') {
+        return 0;
+    }
+    for (Py_ssize_t index = start; index < colon; index++) {
+        if (value[index] != lower_ascii(value[index])) {
+            return 0;
+        }
+    }
+    return url_special_text_plain(value, start, colon, end);
+}
+
 /* True when resolve_links can prove urljoin(base, [start, end)) returns the URL byte-for-byte, so the urljoin call (the
    bulk of resolve's cost, stdlib Python) is skipped for an already-absolute link. Mirrors CPython urllib.parse.urljoin:
-   a reference with a scheme differing from the base's (case-insensitively) is returned verbatim; a same-scheme absolute
-   reference (scheme://netloc...) is reserialized, which reproduces the input only when the scheme is already lowercase,
-   an authority is present, and no tab/CR/LF (which urlsplit strips) appears. The same-scheme case is enabled only for
-   an http/https base, whose scheme reserializes through urlunsplit's netloc branch. */
+   a reference with a scheme differing from the base's (case-insensitively) is returned verbatim, unless it is a special
+   scheme the link join rewrites (url_special_link_plain) or a non-special one whose path has a dot segment; a
+   same-scheme absolute reference (scheme://netloc...) is reserialized, which reproduces the input only when the scheme
+   is already lowercase, an authority is present, and no tab/CR/LF (which urlsplit strips) or backslash appears. The
+   same-scheme case is enabled only for an http/https base, whose scheme reserializes through urlunsplit's netloc
+   branch. */
 static int url_resolves_to_itself(const Py_UCS4 *value, Py_ssize_t start, Py_ssize_t end, const char *base_scheme,
                                   Py_ssize_t base_scheme_len, int base_netloc_scheme) {
     if (!is_ascii_alpha(value[start])) { /* a scheme starts with a letter; a span is never empty (start < end) */
@@ -734,7 +1001,9 @@ static int url_resolves_to_itself(const Py_UCS4 *value, Py_ssize_t start, Py_ssi
         same_scheme = lower_ascii(value[start + index]) == (Py_UCS4)(unsigned char)base_scheme[index];
     }
     if (!same_scheme) {
-        return 1;
+        return url_special_link_plain(value, start, colon, end) ||
+               (!th_url_scheme_special(value, start, colon) && !url_path_has_dot_candidate(value, colon + 1, end) &&
+                !url_authority_escapes(value, colon + 1, end) && !url_path_needs_encoding(value, colon + 1, end));
     }
     if (!base_netloc_scheme) {
         return 0;
@@ -753,12 +1022,7 @@ static int url_resolves_to_itself(const Py_UCS4 *value, Py_ssize_t start, Py_ssi
         value[netloc] == '#') {
         return 0;
     }
-    for (Py_ssize_t index = start; index < end; index++) {
-        if (value[index] == '\t' || value[index] == '\r' || value[index] == '\n') {
-            return 0;
-        }
-    }
-    return 1;
+    return url_special_text_plain(value, start, colon, end);
 }
 
 /* Call replace(url) for each span and build a rewritten value, or leave the value untouched when every replacement is
@@ -1179,9 +1443,16 @@ PyObject *turbohtml_node_resolve_links(PyObject *owner, th_tree *tree, th_node *
         Py_DECREF(urljoin); /* GCOVR_EXCL_LINE: attribute-failure path */
         return NULL;        /* GCOVR_EXCL_LINE */
     }
-    PyObject *bound = PyObject_CallFunctionObjArgs(partial, urljoin, base_url, NULL);
+    PyObject *base = th_url_normalize_base(base_url);
+    if (base == NULL) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        Py_DECREF(partial); /* GCOVR_EXCL_LINE: allocation-failure path */
+        Py_DECREF(urljoin); /* GCOVR_EXCL_LINE: allocation-failure path */
+        return NULL;        /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    PyObject *bound = PyObject_CallFunctionObjArgs(partial, urljoin, base, NULL);
     Py_DECREF(partial);
     Py_DECREF(urljoin);
+    Py_DECREF(base);
     if (bound == NULL) { /* GCOVR_EXCL_BR_LINE: binding a partial cannot be forced to fail from a test */
         return NULL;     /* GCOVR_EXCL_LINE: allocation-failure path */
     }

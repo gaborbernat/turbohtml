@@ -292,7 +292,8 @@ static const th_encoding_entry th_encoding_table[] = {
 };
 
 /* Resolve a label (any case, surrounding ASCII whitespace allowed) to its table
-   entry, or NULL when the label is not one we support. */
+   entry, or NULL when the label is not one we support. A NUL inside the label never matches: the table
+   compares C strings, which would stop at it and match a shorter label. */
 static const th_encoding_entry *th_encoding_lookup(const char *label, Py_ssize_t len) {
     char lowered[64];
     while (len > 0 && is_attr_space((unsigned char)*label)) {
@@ -307,6 +308,9 @@ static const th_encoding_entry *th_encoding_lookup(const char *label, Py_ssize_t
     }
     for (Py_ssize_t index = 0; index < len; index++) {
         unsigned char ch = (unsigned char)label[index];
+        if (ch == '\0') {
+            return NULL;
+        }
         lowered[index] = (char)lower_ascii(ch);
     }
     lowered[len] = '\0';

@@ -1487,7 +1487,9 @@ def test_computed_style_first_legend_refreshes_after_insert() -> None:
     ("case_index", "expected"),
     [
         pytest.param(0, ("blue",) * 512, id="deep-missing"),
-        pytest.param(1, ("red",) * 510 + ("blue",) * 2, id="deep-matching"),
+        # past the depth cap the parser attaches deeper nodes beside their deepest allowed ancestor, so the last three
+        # divs hold no match
+        pytest.param(1, ("red",) * 509 + ("blue",) * 3, id="deep-matching"),
         pytest.param(2, ("red", "blue") * 2_048, id="wide-positional"),
         pytest.param(3, ("red",) * 8, id="shallow-has"),
     ],
@@ -2016,6 +2018,38 @@ def _between(run: str, low: int, high: int, tag: str) -> bool:
 
 def _of_from_end(run: str, anchor: int, element: int, offsets: Callable[[int], bool]) -> int:
     return sum(offsets(index - anchor) for index in range(element, len(run))) if offsets(element - anchor) else 0
+
+
+@pytest.mark.parametrize(
+    ("step", "offset"),
+    [
+        pytest.param(2**32 + 2, -(2**32 - 1), id="step-past-int-max"),
+        pytest.param(-(2**32 + 2), 5, id="negative-step-past-int-max"),
+        pytest.param(3, -(2**31), id="offset-past-int-min"),
+        pytest.param(2**32 + 2, 2**31 + 5, id="offset-past-int-max"),
+        pytest.param(3, 2**31 + 5, id="small-step-offset-past-int-max"),
+        pytest.param(0, -(2**31), id="zero-step-int-min-offset"),
+    ],
+)
+def test_computed_style_sweep_wide_nth_agrees_with_formula(step: int, offset: int) -> None:
+    count: Final = 48
+    nodes: Final = parse(
+        f"<style>*{{color:blue}}x:has(~ x:nth-child({step}n{offset:+d} of :scope ~ *)){{color:red}}</style>"
+        f"<p>{'<x></x>' * count}</p>"
+    ).select("p > x")
+    assert [computed_style(node)["color"] for node in nodes] == [
+        "red" if any(_nth_matches(step, offset, later - index) for later in range(index + 1, count + 1)) else "blue"
+        for index in range(1, count + 1)
+    ]
+
+
+def _nth_matches(step: int, offset: int, distance: int) -> bool:
+    # browsers saturate every An+B coefficient to the 32-bit int range before matching
+    step, offset = max(-(2**31), min(2**31 - 1, step)), max(-(2**31), min(2**31 - 1, offset))
+    if step == 0:
+        return distance == offset
+    difference = distance - offset
+    return difference % step == 0 and difference // step >= 0
 
 
 @pytest.mark.parametrize(

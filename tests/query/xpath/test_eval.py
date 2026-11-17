@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import random
 import re
 import subprocess  # ruff:ignore[suspicious-subprocess-import]  # the test runs a fixed command in a subprocess
 import sys
@@ -16,7 +17,7 @@ from weakref import finalize, ref
 import pytest
 
 import turbohtml
-from turbohtml import Document, Element, Text, XPath, XPathString, parse, parse_fragment, parse_xml
+from turbohtml import Doctype, Document, Element, Text, XPath, XPathString, parse, parse_fragment, parse_xml
 from turbohtml.convert import css_to_xpath
 from turbohtml.query import XPathDepthError
 
@@ -1973,6 +1974,418 @@ def test_a_path_tested_for_emptiness_grows_linearly(expression: str, work_steps:
     work_steps.assert_within(partial(document.xpath, expression), partial(document.xpath, "//p[self::p]"), factor=20)
 
 
+def _nested_chain(size: int) -> turbohtml.Node:
+    return parse_xml(f"<r>{'<a>' * size}{'</a>' * size}</r>")
+
+
+def _chain_under_b(size: int) -> turbohtml.Node:
+    return parse_xml(f"<r><b>{'<a>' * size}{'</a>' * size}</b></r>")
+
+
+def _chain_with_b_at_bottom(size: int) -> turbohtml.Node:
+    return parse_xml(f"<r>{'<a>' * size}<b><c/></b>{'</a>' * size}</r>")
+
+
+def _siblings(size: int) -> turbohtml.Node:
+    return parse_xml(f"<r>{'<a/>' * size}</r>")
+
+
+def _siblings_then_b(size: int) -> turbohtml.Node:
+    return parse_xml(f"<r>{'<a/>' * size}<b/></r>")
+
+
+def _b_then_siblings(size: int) -> turbohtml.Node:
+    return parse_xml(f"<r><b/>{'<a/>' * size}</r>")
+
+
+# A predicate that walks an ancestor, sibling, preceding or following axis from every context node must not repeat that
+# walk for each node: the steps grow linearly whether the walk finds its node near or far, or finds none.
+@pytest.mark.parametrize(
+    ("expression", "build"),
+    [
+        pytest.param("//a[ancestor::b]", _nested_chain, id="ancestor-none"),
+        pytest.param("//a[ancestor::b]", _chain_under_b, id="ancestor-far"),
+        pytest.param("//a[ancestor-or-self::b]", _nested_chain, id="ancestor-or-self"),
+        pytest.param("//a[ancestor::b/c]", _nested_chain, id="ancestor-then-child"),
+        pytest.param("//a[ancestor::b[1]]", _nested_chain, id="ancestor-nearest"),
+        pytest.param("//a[ancestor::b[c]]", _nested_chain, id="ancestor-predicate"),
+        pytest.param("//a[not(ancestor::b)]", _nested_chain, id="not-ancestor"),
+        pytest.param("//a[count(ancestor::b) = 0]", _nested_chain, id="count-ancestor"),
+        pytest.param("//a[preceding::b]", _siblings, id="preceding-none"),
+        pytest.param("//a[preceding::b]", _b_then_siblings, id="preceding-far"),
+        pytest.param("//a[count(preceding::b) = 0]", _siblings, id="count-preceding"),
+        pytest.param("//a[following::b]", _siblings, id="following-none"),
+        pytest.param("//a[following::b]", _siblings_then_b, id="following-far"),
+        pytest.param("//a[preceding-sibling::b]", _b_then_siblings, id="preceding-sibling-far"),
+        pytest.param("//a[following-sibling::b]", _siblings_then_b, id="following-sibling-far"),
+        pytest.param("//a[ancestor::b[1]/c]", _nested_chain, id="ancestor-nearest-then-child"),
+        pytest.param("//a[ancestor::b[1]/c]", _chain_under_b, id="ancestor-nearest-then-child-far"),
+        pytest.param("//a[ancestor::b[c][1]]", _nested_chain, id="ancestor-predicate-nearest"),
+        pytest.param("//a[ancestor-or-self::b[c][1]]", _nested_chain, id="ancestor-or-self-predicate-nearest"),
+        pytest.param("//a[count(ancestor::b[c][1]) = 0]", _nested_chain, id="count-ancestor-predicate-nearest"),
+        pytest.param("//a[preceding::b[c][1]]", _siblings, id="preceding-predicate-nearest-none"),
+        pytest.param("//a[preceding::b[1]/c]", _b_then_siblings, id="preceding-nearest-then-child"),
+        pytest.param("//a[following::b[c][1]]", _siblings_then_b, id="following-predicate-nearest-far"),
+        pytest.param("//a[preceding-sibling::b[c][1]]", _b_then_siblings, id="preceding-sibling-predicate-nearest"),
+        pytest.param("//a[following-sibling::b[c][1]]", _siblings, id="following-sibling-predicate-none"),
+        pytest.param("//a[following-sibling::b[1]/c]", _siblings_then_b, id="following-sibling-nearest-then-child"),
+        pytest.param("//a[ancestor::b[last()]]", _nested_chain, id="ancestor-last"),
+        pytest.param("//a[ancestor::b[2]]", _chain_under_b, id="ancestor-second-far"),
+        pytest.param("//a[ancestor-or-self::b[last()]/c]", _chain_under_b, id="ancestor-or-self-last-then-child"),
+        pytest.param("//a[preceding::b[2]]", _siblings, id="preceding-second-none"),
+        pytest.param("//a[preceding::b[last()]]", _b_then_siblings, id="preceding-last-far"),
+        pytest.param("//a[preceding::b[position() = 2]/c]", _b_then_siblings, id="preceding-position-then-child"),
+        pytest.param("//a[following::b[2]]", _siblings_then_b, id="following-second-far"),
+        pytest.param("//a[following::b[last()]]", _siblings, id="following-last-none"),
+        pytest.param("//a[preceding-sibling::b[2]]", _b_then_siblings, id="preceding-sibling-second"),
+        pytest.param("//a[following-sibling::b[last()]]", _siblings_then_b, id="following-sibling-last"),
+        pytest.param("//a[descendant::b]", _nested_chain, id="descendant-none"),
+        pytest.param("//a[descendant::b]", _chain_with_b_at_bottom, id="descendant-far"),
+        pytest.param("//a[descendant::b[2]]", _nested_chain, id="descendant-second-none"),
+        pytest.param("//a[descendant::b[last()]]", _chain_with_b_at_bottom, id="descendant-last-far"),
+        pytest.param("//a[descendant::b[1]/c]", _chain_with_b_at_bottom, id="descendant-nearest-then-child"),
+        pytest.param("//a[descendant::b/c]", _chain_with_b_at_bottom, id="descendant-then-child"),
+        pytest.param("//a[descendant-or-self::b[2]]", _nested_chain, id="descendant-or-self-second"),
+    ],
+)
+def test_walk_predicate_grows_linearly(
+    expression: str, build: Callable[[int], turbohtml.Node], work_steps: WorkSteps
+) -> None:
+    work_steps.assert_linear(lambda size: partial(build(size).xpath, expression), (500, 2000))
+
+
+# Each pair is the same selection written with a positional predicate that is always true, which keeps the plain walk.
+# The memo has to return what that walk returns from every context node.
+@pytest.mark.parametrize(
+    ("expression", "plain"),
+    [
+        pytest.param("ancestor::b", "ancestor::*[self::b][position() > 0]", id="ancestor"),
+        pytest.param("ancestor-or-self::b", "ancestor-or-self::*[self::b][position() > 0]", id="ancestor-or-self"),
+        pytest.param("preceding::b", "preceding::*[self::b][position() > 0]", id="preceding"),
+        pytest.param("following::b", "following::*[self::b][position() > 0]", id="following"),
+        pytest.param("preceding-sibling::b", "preceding-sibling::*[self::b][position() > 0]", id="preceding-sibling"),
+        pytest.param("following-sibling::b", "following-sibling::*[self::b][position() > 0]", id="following-sibling"),
+        pytest.param("ancestor::b[1]", "ancestor::*[self::b][position() > 0][1]", id="nearest"),
+        pytest.param("preceding::b[1]", "preceding::*[self::b][position() > 0][1]", id="preceding-nearest"),
+        pytest.param("ancestor::b/c", "ancestor::*[self::b][position() > 0]/c", id="rest"),
+        pytest.param("following-sibling::b/c", "following-sibling::*[self::b][position() > 0]/c", id="rest-sibling"),
+        pytest.param("preceding::b/c", "preceding::*[self::b][position() > 0]/c", id="rest-preceding"),
+        pytest.param("following::b/c[1]", "following::*[self::b][position() > 0]/c[1]", id="rest-following"),
+        pytest.param("ancestor::b[c]", "ancestor::*[self::b][c][position() > 0]", id="predicate"),
+        pytest.param(
+            "preceding::b[c and not(d)]/c",
+            "preceding::*[self::b][c and not(d)][position() > 0]/c",
+            id="predicate-rest",
+        ),
+        pytest.param(
+            "following-sibling::*[self::b or self::c][ancestor::a]",
+            "following-sibling::*[self::b or self::c][ancestor::a][position() > 0]",
+            id="predicate-walk",
+        ),
+        pytest.param("ancestor::b[1]/c", "ancestor::*[self::b][position() > 0][1]/c", id="nearest-rest"),
+        pytest.param("ancestor::b[c][1]", "ancestor::*[self::b][c][position() > 0][1]", id="predicate-nearest"),
+        pytest.param(
+            "preceding::b[c and not(d)][1]/c",
+            "preceding::*[self::b][c and not(d)][position() > 0][1]/c",
+            id="predicate-nearest-rest-preceding",
+        ),
+        pytest.param(
+            "following-sibling::b[c][1]",
+            "following-sibling::*[self::b][c][position() > 0][1]",
+            id="sibling-predicate-nearest",
+        ),
+        pytest.param(
+            "ancestor-or-self::b[c][1]/d",
+            "ancestor-or-self::*[self::b][c][position() > 0][1]/d",
+            id="self-or-ancestor-predicate-nearest-rest",
+        ),
+        pytest.param("descendant::b", "descendant::*[self::b][position() > 0]", id="descendant"),
+        pytest.param("descendant::b[2]", "descendant::*[self::b][position() > 0][2]", id="descendant-second"),
+        pytest.param(
+            "descendant::b[last()]/c",
+            "descendant::*[self::b][position() > 0][last()]/c",
+            id="descendant-last-rest",
+        ),
+        pytest.param(
+            "descendant-or-self::b[c][1]",
+            "descendant-or-self::*[self::b][c][position() > 0][1]",
+            id="descendant-or-self-predicate-nearest",
+        ),
+        pytest.param(
+            "ancestor::b[position() = 2]",
+            "ancestor::*[self::b][position() > 0][position() = 2]",
+            id="ancestor-position-equals",
+        ),
+        pytest.param(
+            "following-sibling::b[last()]/c",
+            "following-sibling::*[self::b][position() > 0][last()]/c",
+            id="following-sibling-last-rest",
+        ),
+        pytest.param(
+            "preceding::b[c][2]", "preceding::*[self::b][c][position() > 0][2]", id="preceding-predicate-second"
+        ),
+        pytest.param(
+            "ancestor::b[2 = position()]",
+            "ancestor::*[self::b][position() > 0][2 = position()]",
+            id="position-on-the-right",
+        ),
+        pytest.param("ancestor::b[0]", "ancestor::*[self::b][position() > 0][0]", id="position-zero"),
+        pytest.param(
+            "ancestor::b[position() > 1]",
+            "ancestor::*[self::b][position() > 0][position() > 1]",
+            id="position-after-one",
+        ),
+        pytest.param(
+            "descendant::b[position() > 1]",
+            "descendant::*[self::b][position() > 0][position() > 1]",
+            id="descendant-position-after-one",
+        ),
+        pytest.param("preceding::b[2.5]", "preceding::*[self::b][position() > 0][2.5]", id="position-fraction"),
+        pytest.param("preceding::b[-1]", "preceding::*[self::b][position() > 0][-1]", id="position-negative"),
+        pytest.param(
+            "following::b[100000000000000000000]",
+            "following::*[self::b][position() > 0][100000000000000000000]",
+            id="position-huge",
+        ),
+        pytest.param(
+            "ancestor::b[count(c) = position()]",
+            "ancestor::*[self::b][position() > 0][count(c) = position()]",
+            id="count-equals-position",
+        ),
+        pytest.param(
+            "ancestor::b[count(/) = 1 and position() = 2]",
+            "ancestor::*[self::b][position() > 0][count(/) = 1 and position() = 2]",
+            id="absolute-path-in-predicate",
+        ),
+        pytest.param("preceding::b[9]", "preceding::*[self::b][position() > 0][9]", id="position-beyond-the-axis"),
+        pytest.param(
+            "ancestor::b[last() = position()]",
+            "ancestor::*[self::b][position() > 0][last() = position()]",
+            id="last-equals-position",
+        ),
+        pytest.param(
+            "ancestor::b[count(c) = last()]",
+            "ancestor::*[self::b][position() > 0][count(c) = last()]",
+            id="last-equals-count",
+        ),
+        pytest.param(
+            "ancestor::b[2 = last()]", "ancestor::*[self::b][position() > 0][2 = last()]", id="number-equals-last"
+        ),
+    ],
+)
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_walk_predicate_agrees_with_the_plain_walk(expression: str, plain: str, seed: int) -> None:
+    document: Final = _random_document(seed, 400)
+    for context in _elements(document.xpath("//*")):
+        expected: Final = [node.attr("i") for node in _elements(context.xpath(plain))]
+        assert [node.attr("i") for node in _elements(context.xpath(expression))] == expected
+        assert context.xpath(f"count({expression})") == len(expected)
+        assert context.xpath(f"boolean({expression})") is bool(expected)
+
+
+def _random_document(seed: int, size: int) -> turbohtml.Node:
+    # Random well-formed markup; every element carries its document position as i for comparing node-sets.
+    rng = random.Random(seed)  # ruff:ignore[suspicious-non-cryptographic-random-usage]  # a seeded document, not a secret
+    stack: list[str] = []
+    out: list[str] = []
+    for index in range(size):
+        tag = rng.choice("abcd")
+        if (roll := rng.random()) < 0.45 or not stack:
+            out.append(f'<{tag} i="{index}">')
+            stack.append(tag)
+        elif roll < 0.7:
+            out.append(f'<{tag} i="{index}"/>')
+        else:
+            out.append(f"</{stack.pop()}>")
+    out.extend(f"</{tag}>" for tag in reversed(stack))
+    return parse_xml(f"<r>{''.join(out)}</r>")
+
+
+def _elements(result: XPathResult) -> list[Element]:
+    assert isinstance(result, list)
+    return cast("list[Element]", result)
+
+
+@pytest.mark.parametrize(
+    ("expression", "plain"),
+    [
+        pytest.param("//*/@i[ancestor::b]", "//*/@i[ancestor::*[self::b][position() > 0]]", id="ancestor"),
+        pytest.param(
+            "//*/@i[ancestor-or-self::b]",
+            "//*/@i[ancestor-or-self::*[self::b][position() > 0]]",
+            id="ancestor-or-self",
+        ),
+        pytest.param("//*/@i[preceding::b]", "//*/@i[preceding::*[self::b][position() > 0]]", id="preceding"),
+        pytest.param("//*/@i[following::b]", "//*/@i[following::*[self::b][position() > 0]]", id="following"),
+        pytest.param("//*/@i[following::b/c]", "//*/@i[following::*[self::b][position() > 0]/c]", id="following-rest"),
+        pytest.param(
+            "//*/@i[count(preceding::b) = 0]", "//*/@i[count(preceding::*[self::b][position() > 0]) = 0]", id="count"
+        ),
+        pytest.param(
+            "//*/@i[ancestor-or-self::node()[2]]",
+            "//*/@i[ancestor-or-self::node()[position() > 0][2]]",
+            id="self-node-second",
+        ),
+        pytest.param(
+            "//*/@i[ancestor-or-self::node()[last()]/c]",
+            "//*/@i[ancestor-or-self::node()[position() > 0][last()]/c]",
+            id="self-node-last-rest",
+        ),
+        pytest.param(
+            "//*/@i[ancestor-or-self::node()[c][2]]",
+            "//*/@i[ancestor-or-self::node()[c][position() > 0][2]]",
+            id="self-node-predicate-second",
+        ),
+        pytest.param("//*/@i[ancestor::b[2]]", "//*/@i[ancestor::*[self::b][position() > 0][2]]", id="ancestor-second"),
+        pytest.param(
+            "//*/@i[ancestor-or-self::b[c][2]]",
+            "//*/@i[ancestor-or-self::*[self::b][c][position() > 0][2]]",
+            id="self-or-ancestor-owner-good",
+        ),
+        pytest.param("//*/@i[descendant::b[2]]", "//*/@i[descendant::*[self::b][position() > 0][2]]", id="descendant"),
+        pytest.param(
+            "//*/@i[descendant-or-self::b[2]]",
+            "//*/@i[descendant-or-self::*[self::b][position() > 0][2]]",
+            id="descendant-or-self-name",
+        ),
+        pytest.param(
+            "//*/@i[descendant-or-self::node()[last()]]",
+            "//*/@i[descendant-or-self::node()[position() > 0][last()]]",
+            id="descendant-or-self-node-last",
+        ),
+        pytest.param(
+            "//*/@i[descendant-or-self::node()[c][last()]]",
+            "//*/@i[descendant-or-self::node()[c][position() > 0][last()]]",
+            id="descendant-or-self-node-predicate-last",
+        ),
+        pytest.param("//*/@i[following::b[2]]", "//*/@i[following::*[self::b][position() > 0][2]]", id="following"),
+        pytest.param(
+            "//*/@i[preceding-sibling::b[2]]",
+            "//*/@i[preceding-sibling::*[self::b][position() > 0][2]]",
+            id="sibling-owned-second",
+        ),
+        pytest.param(
+            "//*/@i[descendant-or-self::node()[1]]",
+            "//*/@i[descendant-or-self::node()[position() > 0][1]]",
+            id="descendant-or-self-node-nearest",
+        ),
+        pytest.param(
+            "//*/@i[descendant-or-self::node()[2]]",
+            "//*/@i[descendant-or-self::node()[position() > 0][2]]",
+            id="descendant-or-self-node-second",
+        ),
+        pytest.param(
+            "//*/@i[descendant-or-self::node()]",
+            "//*/@i[descendant-or-self::node()[position() > 0]]",
+            id="descendant-or-self-node-any",
+        ),
+        pytest.param(
+            "//*/@i[ancestor-or-self::node()]",
+            "//*/@i[ancestor-or-self::node()[position() > 0]]",
+            id="self-node-any",
+        ),
+        pytest.param(
+            "//*/@i[preceding-sibling::b]",
+            "//*/@i[preceding-sibling::*[self::b][position() > 0]]",
+            id="sibling-owned-any",
+        ),
+        pytest.param(
+            "//*/@i[/ancestor-or-self::node()]",
+            "//*/@i[/ancestor-or-self::node()[position() > 0]]",
+            id="absolute-self-node",
+        ),
+        pytest.param(
+            "//*/@i[/preceding-sibling::b]",
+            "//*/@i[/preceding-sibling::*[self::b][position() > 0]]",
+            id="absolute-sibling",
+        ),
+    ],
+)
+def test_walk_predicate_on_an_attribute_agrees_with_the_plain_walk(expression: str, plain: str) -> None:
+    document: Final = _random_document(5, 300)
+    assert [str(node) for node in _elements(document.xpath(expression))] == [
+        str(node) for node in _elements(document.xpath(plain))
+    ]
+
+
+@pytest.mark.parametrize(
+    ("expression", "error", "message"),
+    [
+        pytest.param("//a[ancestor::x:b[2]]", ValueError, "undefined namespace prefix", id="unbound-prefix"),
+        pytest.param("//a[ancestor::b[count(1)][2]]", TypeError, "count", id="predicate"),
+        pytest.param("//a[descendant::b[count(1)]]", TypeError, "count", id="descendant-predicate"),
+        pytest.param("//*/@i[ancestor-or-self::node()[count(1)][2]]", TypeError, "count", id="attribute-predicate"),
+        pytest.param(
+            "//*/@i[descendant-or-self::node()[count(1)][2]]", TypeError, "count", id="attribute-descendant-predicate"
+        ),
+    ],
+)
+def test_positional_selection_raises_what_the_plain_walk_raises(
+    expression: str, error: type[Exception], message: str
+) -> None:
+    document: Final = _random_document(6, 60)
+    with pytest.raises(error, match=message):
+        document.xpath(expression)
+
+
+@pytest.mark.parametrize(
+    ("markup", "expression", "plain"),
+    [
+        pytest.param(
+            '<r><c/><a i="1"><c/></a><a i="2"/></r>',
+            "//*/@i[ancestor-or-self::node()[not(node())][last()]]",
+            "//*/@i[ancestor-or-self::node()[not(node())][position() > 0][last()]]",
+            id="attribute-without-good-ancestor",
+        ),
+        pytest.param(
+            '<r><a i="2"/></r>',
+            "//*/@i[ancestor-or-self::node()[c][last()]]",
+            "//*/@i[ancestor-or-self::node()[c][position() > 0][last()]]",
+            id="attribute-with-nothing-good",
+        ),
+    ],
+)
+def test_last_selection_on_an_attribute_agrees_with_the_plain_walk(markup: str, expression: str, plain: str) -> None:
+    document: Final = parse_xml(markup)
+    assert [str(node) for node in _elements(document.xpath(expression))] == [
+        str(node) for node in _elements(document.xpath(plain))
+    ]
+
+
+@pytest.mark.parametrize(
+    ("expression", "plain"),
+    [
+        pytest.param("//a[ancestor::b or sign()]", "//a[ancestor::*[self::b] or sign()]", id="python-call"),
+        pytest.param(
+            "//a[ancestor::b[2] or sign()]",
+            "//a[ancestor::*[self::b][position() > 0][2] or sign()]",
+            id="python-call-positional",
+        ),
+        pytest.param("//a[/]", "//a[/]", id="absolute-root-predicate"),
+        pytest.param(
+            "//a[(ancestor::b)[1]/ancestor::b[2]]",
+            "//a[(ancestor::b)[1]/ancestor::*[self::b][position() > 0][2]]",
+            id="filtered-base-predicate",
+        ),
+    ],
+)
+def test_walk_predicate_falls_back_to_the_plain_walk(expression: str, plain: str) -> None:
+    document: Final = _random_document(4, 300)
+    extensions: Final[XPathExtensions] = {(None, "sign"): lambda _ctx: False}
+    assert [str(node) for node in _elements(document.xpath(expression, extensions=extensions))] == [
+        str(node) for node in _elements(document.xpath(plain, extensions=extensions))
+    ]
+
+
+def test_positional_selection_with_an_extension_that_no_predicate_calls_agrees_with_the_plain_walk() -> None:
+    document: Final = _random_document(4, 300)
+    extensions: Final[XPathExtensions] = {(None, "sign"): lambda _ctx: False}
+    assert [str(node) for node in _elements(document.xpath("//a[ancestor::b[2]]", extensions=extensions))] == [
+        str(node)
+        for node in _elements(document.xpath("//a[ancestor::*[self::b][position() > 0][2]]", extensions=extensions))
+    ]
+
+
 def _siblings(count: int) -> Document:
     children: Final = "".join(f'<c k="{index}"/>' for index in range(count))
     return parse_xml(f"<r>{children}</r>")
@@ -2888,6 +3301,13 @@ _LXML_EXPRS: Final[tuple[str, ...]] = (
     "count(//p)",
     "count(//li)",
     "count(//article)",
+    "/node()",
+    "count(/node())",
+    "count(../node())",
+    "count(//node())",
+    "count(preceding-sibling::node())",
+    "count(self::*)",
+    "count(ancestor-or-self::*)",
     "string(//title)",
     "//p[count(//article)=2]",
     "boolean(//p)",
@@ -2910,10 +3330,17 @@ _LXML_SCALAR_EXPRS: Final[list[str]] = [expr for expr in _LXML_EXPRS if expr.sta
 def test_matches_lxml(doc_name: str, expr: str) -> None:
     lxml_html: Final = pytest.importorskip("lxml.html")
     html: Final = _LXML_DOCS[doc_name]
-    ours: Final = turbohtml.parse(html).xpath(expr)
+    ours: Final = _root_element(html).xpath(expr)
     assert isinstance(ours, list)
     theirs: Final = lxml_html.document_fromstring(html).xpath(expr)
     assert _normalize_lxml(ours) == _normalize_lxml(theirs)
+
+
+def _root_element(html: str) -> Element:
+    # lxml evaluates XPath from the root element, not the document node, so the turbohtml side does too.
+    root: Final = parse(html).root
+    assert root is not None
+    return root
 
 
 @pytest.mark.oracle
@@ -2934,7 +3361,32 @@ def _normalize_lxml(result: Iterable[turbohtml.Node | str]) -> list[str]:
 def test_matches_lxml_scalar(doc_name: str, expr: str) -> None:
     lxml_html: Final = pytest.importorskip("lxml.html")
     html: Final = _LXML_DOCS[doc_name]
-    assert turbohtml.parse(html).xpath(expr) == lxml_html.document_fromstring(html).xpath(expr)
+    assert _root_element(html).xpath(expr) == lxml_html.document_fromstring(html).xpath(expr)
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "/node()",
+        "/descendant::node()",
+        "/descendant-or-self::node()",
+        "self::node()",
+        "parent::node()",
+        "following-sibling::node()",
+        "preceding-sibling::node()",
+        "following::node()",
+        "preceding::node()",
+        "ancestor-or-self::node()",
+    ],
+)
+def test_node_test_never_yields_doctype(expr: str) -> None:
+    html: Final = "<!doctype html><html><body><p>x</p></body></html>"
+    doc: Final = parse(html)
+    doctype: Final = next(child for child in doc.children if isinstance(child, Doctype))
+    for context in (doc, _root_element(html), doctype):
+        selected: Final = context.xpath(expr)
+        assert isinstance(selected, list)
+        assert [node for node in selected if isinstance(node, Doctype)] == []
 
 
 class _Evaluate(Protocol):

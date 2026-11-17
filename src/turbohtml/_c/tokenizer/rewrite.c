@@ -177,7 +177,30 @@ static void rw_out_str(rw_out *out, PyObject *str) {
     }
 }
 
-/* Append a code-point run, HTML-escaping the markup-significant code points. */
+/* Append raw text, writing each CR or CRLF as LF: raw text has no character reference for a CR, and a parse folds a
+   raw CR to LF, so the LF is what a reparse reads back. */
+static void rw_out_raw(rw_out *out, PyObject *str) {
+    Py_ssize_t len = PyUnicode_GET_LENGTH(str);
+    if (PyUnicode_FindChar(str, '\r', 0, len, 1) < 0) {
+        rw_out_str(out, str);
+        return;
+    }
+    int kind = PyUnicode_KIND(str);
+    const void *data = PyUnicode_DATA(str);
+    for (Py_ssize_t index = 0; index < len; index++) {
+        Py_UCS4 ch = PyUnicode_READ(kind, data, index);
+        if (ch == '\r') {
+            rw_out_char(out, '\n');
+            if (index + 1 < len && PyUnicode_READ(kind, data, index + 1) == '\n') {
+                index++;
+            }
+        } else {
+            rw_out_char(out, ch);
+        }
+    }
+}
+
+/* Append a code-point run, HTML-escaping the markup-significant code points and the CR a parse would fold to LF. */
 static void rw_out_escaped(rw_out *out, int kind, const void *data, Py_ssize_t len) {
     for (Py_ssize_t index = 0; index < len; index++) {
         Py_UCS4 ch = PyUnicode_READ(kind, data, index);
@@ -187,6 +210,8 @@ static void rw_out_escaped(rw_out *out, int kind, const void *data, Py_ssize_t l
             rw_out_ascii(out, "&lt;");
         } else if (ch == '>') {
             rw_out_ascii(out, "&gt;");
+        } else if (ch == '\r') {
+            rw_out_ascii(out, "&#13;");
         } else {
             rw_out_char(out, ch);
         }
@@ -196,7 +221,7 @@ static void rw_out_escaped(rw_out *out, int kind, const void *data, Py_ssize_t l
 /* Append a str, HTML-escaping the markup-significant code points, unless raw is set. */
 static void rw_out_content(rw_out *out, PyObject *str, int raw) {
     if (raw) {
-        rw_out_str(out, str);
+        rw_out_raw(out, str);
         return;
     }
     rw_out_escaped(out, PyUnicode_KIND(str), PyUnicode_DATA(str), PyUnicode_GET_LENGTH(str));
@@ -486,16 +511,9 @@ typedef struct {
     Py_ssize_t retired_node_count;
 } rw_ctx;
 
-/* The deepest element nesting the rewriter tracks. Past it a start tag is still emitted
-   but not pushed, so a pathologically deep or unclosed input keeps the spine (and the C
-   stack the selector matcher walks) bounded rather than growing without limit. A raw-text
-   or RCDATA element takes the one slot past the cap: the tokenizer reads its content as
-   text, as the tree builder does, and no start tag is read while it is open. */
-#define RW_MAX_DEPTH TH_DEPTH_LIMIT(8192)
-
 /* The most closed elements the stand-ins' memos may name (see rw_ctx.retired_nodes). Emptying them costs the walks
    that refill them no more than the closed elements already paid for. */
-#define RW_DEEP_RETIRED_MAX ((Py_ssize_t)8 * RW_MAX_DEPTH)
+#define RW_DEEP_RETIRED_MAX ((Py_ssize_t)8 * TH_DEPTH_LIMIT(8192))
 
 /* Switch the rules that climb at least this far (sel_compiled.climbs) to stand-ins that keep the answers of their
    ancestor walks: those that climb from their climbs from the start, the others once the spine grows past
@@ -580,6 +598,7 @@ typedef struct {
     int live; /* cleared once the handler returns, so a stashed handle raises */
     /* text/comment edits recorded here, applied by the driver after the handler */
     int removed;
+    int subtree;            /* remove or replace dropped the element with its content, so a prepend goes too */
     PyObject *replace_html; /* replacement for the whole node, or NULL */
     int replace_raw;
     PyObject *before_html; /* emitted before the node (accumulated) */
@@ -612,6 +631,12 @@ static int rw_name_is(const th_node *node, const th_buf *name) {
 static int rw_output_raw(const rw_ctx *ctx, const rw_open *element) {
     const th_buf *name;
     return th_shadow_mirror_model(ctx->mirror, &name) != TH_INIT_DATA && rw_name_is(element->node, name);
+}
+
+/* The lowest spine index an end tag searches. The spine grows with the input, but the search reads only the top
+   TH_MAX_TREE_DEPTH elements, so a stray end tag costs the same at any depth, as the depth cap used to bound it. */
+static Py_ssize_t rw_window_floor(const rw_ctx *ctx) {
+    return ctx->depth > TH_MAX_TREE_DEPTH ? ctx->depth - TH_MAX_TREE_DEPTH : 0;
 }
 
 /* Whether the token being handled is the text of a raw-text or RCDATA element whose start tag is in the output. */
@@ -658,13 +683,13 @@ static int rw_handle_check(rw_handle *self, enum rw_kind kind) {
     return 0;
 }
 
-/* Escape (or keep raw) one content argument into a new str, or return the raw ref. */
+/* Escape (or keep raw) one content argument into a new str, or return the raw ref when it holds no CR to fold. */
 static PyObject *rw_escape_arg(PyObject *content, int raw) {
-    if (raw) {
+    if (raw && PyUnicode_FindChar(content, '\r', 0, PyUnicode_GET_LENGTH(content), 1) < 0) {
         return Py_NewRef(content);
     }
     rw_out scratch = {.data = NULL};
-    rw_out_content(&scratch, content, 0);
+    rw_out_content(&scratch, content, raw);
     if (scratch.failed) {         /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
         PyMem_Free(scratch.data); /* GCOVR_EXCL_LINE: allocation-failure path */
         return PyErr_NoMemory();  /* GCOVR_EXCL_LINE: allocation-failure path */
@@ -754,6 +779,7 @@ static PyObject *rw_replace(rw_handle *self, PyObject *args, PyObject *kwds) {
         return NULL;
     }
     self->removed = 1;
+    self->subtree = 1;
     self->replace_raw = rw_text_is_raw(self, raw, 0);
     Py_XSETREF(self->replace_html, Py_NewRef(content));
     if (self->kind == RW_ELEMENT) {
@@ -769,6 +795,7 @@ static PyObject *rw_remove(rw_handle *self, PyObject *Py_UNUSED(ignored)) {
         return NULL;
     }
     self->removed = 1;
+    self->subtree = 1;
     Py_CLEAR(self->replace_html);
     if (self->kind == RW_ELEMENT) {
         self->open->drop_content = 1;
@@ -1169,6 +1196,8 @@ static void rw_emit_start_tag(rw_ctx *ctx, th_node *node, int self_closing) {
                     rw_out_ascii(&ctx->out, "&lt;");
                 } else if (ch == '>') {
                     rw_out_ascii(&ctx->out, "&gt;");
+                } else if (ch == '\r') {
+                    rw_out_ascii(&ctx->out, "&#13;");
                 } else {
                     rw_out_char(&ctx->out, ch);
                 }
@@ -1757,11 +1786,6 @@ static int rw_spine_foreign(const rw_ctx *ctx) {
 }
 
 /* Whether any handler is registered: without one the output is the input, so a misread of it changes nothing. */
-static int rw_has_handler(const rw_ctx *ctx) {
-    return ctx->rule_count > 0 || ctx->text_handler != NULL || ctx->comment_handler != NULL ||
-           ctx->doctype_handler != NULL;
-}
-
 /* The spine and the th_shadow read the input; the output is the input with the handlers' edits, and a browser parses
    the output. Edits to attributes, to comments and to the text of a raw-text element leave every later token read as
    in the input, as does removing a raw-text element. Dropping any other tag or writing anywhere else can change it:
@@ -2294,7 +2318,8 @@ static void rw_note_body(rw_ctx *ctx, Py_ssize_t at) {
 static void rw_pair_tree(rw_ctx *ctx) {
     Py_ssize_t count;
     th_node *const *open = th_shadow_open(ctx->shadow, &count);
-    for (Py_ssize_t index = 0; index < count; index++) {
+    /* only the top TH_MAX_TREE_DEPTH open elements are paired, so a pairing costs the same at any depth */
+    for (Py_ssize_t index = count > TH_MAX_TREE_DEPTH ? count - TH_MAX_TREE_DEPTH : 0; index < count; index++) {
         TH_WORK_STEP();
         /* an element the tree builder made up (html, a body, a tbody, a formatting element's clone) is at line 0 */
         Py_ssize_t at = rw_entry_at(ctx, node_pos(open[index])[0], node_pos(open[index])[1]);
@@ -2302,7 +2327,8 @@ static void rw_pair_tree(rw_ctx *ctx) {
             ctx->stack[at].shadow = open[index];
         }
     }
-    for (Py_ssize_t index = 0; index < ctx->depth; index++) {
+    /* the entries below the window keep the links they had when they were in it */
+    for (Py_ssize_t index = rw_window_floor(ctx); index < ctx->depth; index++) {
         TH_WORK_STEP();
         rw_open *entry = &ctx->stack[index];
         entry->followed = (int32_t)(entry->shadow != NULL ? index : index > 0 ? ctx->stack[index - 1].followed : -1);
@@ -2559,24 +2585,6 @@ static TH_NOINLINE void rw_mirror_opened(rw_ctx *ctx, rw_open *open, rw_handle *
     Py_CLEAR(ctx->append_text); /* the tags stay, so the content stays raw text */
 }
 
-/* A start tag past the depth cap: the tree builder refuses the element, so its tags stream through and its end tag
-   closes only an element the spine still holds. No content is found again, so an edit that needs one raises. The
-   spine also loses the namespace an SVG or MathML element would give what follows, so a handler could not see it
-   read as the browser does. */
-static TH_NOINLINE void rw_refuse_element(rw_ctx *ctx, rw_open *open) {
-    if (open->drop_content || open->append_html != NULL || open->after_html != NULL) {
-        PyErr_SetString(PyExc_ValueError,
-                        "an element nested past the depth limit cannot be removed or have its content edited");
-        ctx->error = 1;
-    } else if (open->ns != TH_NS_HTML && rw_has_handler(ctx)) {
-        PyErr_SetString(PyExc_ValueError, "SVG or MathML nested past the depth limit cannot be rewritten");
-        ctx->error = 1;
-    }
-    Py_XDECREF(open->append_html);
-    Py_XDECREF(open->after_html);
-    rw_free_node(ctx, open->node);
-}
-
 /* A frameset that replaces the body drops the body's content from the input, but the output still holds what was
    written there. Cut that content out, from where the body opened up to the frameset's own output at `written`, so
    the output reads as the input does once the frameset is gone; the frameset's own output, a mark a handler wrote
@@ -2719,11 +2727,15 @@ static void rw_handle_element(rw_ctx *ctx, th_token *token) {
     }
     if (removed) {
         /* the tags are dropped, so nothing a handler wrote lands between them: there is no raw-text content left to
-           check, and what was appended to a raw-text element is ordinary text now */
+           check, and what was appended to or prepended to a raw-text element is ordinary text now */
         open.literal = 0;
         if (ctx->append_text != NULL) {
             Py_SETREF(open.append_html, ctx->append_text);
             ctx->append_text = NULL;
+        }
+        if (handle->before_text != NULL && !handle->subtree) {
+            Py_XSETREF(handle->before_html, handle->before_text);
+            handle->before_text = NULL;
         }
     } else if (handle != NULL && ctx->mirror == NULL) {
         /* the tags stay, so the content stays raw text; while the mirror runs, rw_mirror_opened decides */
@@ -2749,7 +2761,7 @@ static void rw_handle_element(rw_ctx *ctx, th_token *token) {
         }
         open.content_start = ctx->out.len;
         /* prepend content, then any inner replacement, all inside the element */
-        if (!removed && handle != NULL && handle->before_html != NULL) {
+        if (handle != NULL && handle->before_html != NULL && !handle->subtree) {
             rw_out_str(&ctx->out, handle->before_html);
         }
         if (!removed && open.append_html != NULL && open.drop_content) {
@@ -2785,19 +2797,6 @@ static void rw_handle_element(rw_ctx *ctx, th_token *token) {
         Py_DECREF(handle);
     }
 
-    if (ctx->depth >= RW_MAX_DEPTH) {
-        /* a th_shadow steers the tokenizer, and the tree builder switches it for a raw-text element it refuses at its
-           own cap, so the tokenizer's state is the element's content model even when the spine has none */
-        const th_buf *end_tag;
-        enum th_initial_state tokenized = th_tok_content_model(ctx->sm, &end_tag);
-        if (ctx->shadow != NULL && tokenized != TH_INIT_DATA) {
-            open.model = (int8_t)tokenized;
-        }
-        if (ctx->depth >= RW_MAX_DEPTH + (open.model >= 0)) {
-            rw_refuse_element(ctx, &open);
-            return; /* at the limit nothing was popped either, so the CDATA state stands */
-        }
-    }
     if (ctx->depth == ctx->stack_cap) {
         size_t cap;
         size_t bytes;
@@ -2931,7 +2930,8 @@ static TH_NOINLINE Py_ssize_t rw_foreign_end(rw_ctx *ctx, th_token *token, uint1
         /* a br is void and never stays open, so named is false for it and this loop skips it as before */
         int svg_named = named && atom != TH_TAG_P;
         for (Py_ssize_t index = ctx->depth - 1;
-             svg_named && index >= 0 && ctx->stack[index].ns != TH_NS_HTML; /* GCOVR_EXCL_BR_LINE: hash collision */
+             svg_named && index >= rw_window_floor(ctx) &&
+             ctx->stack[index].ns != TH_NS_HTML; /* GCOVR_EXCL_BR_LINE: hash collision */
              index--) {
             if (rw_end_names(ctx->stack[index].node, token, atom)) {
                 /* dropped, the end tag closes none of the SVG/MathML elements above it in the output */
@@ -2954,7 +2954,7 @@ static TH_NOINLINE Py_ssize_t rw_foreign_end(rw_ctx *ctx, th_token *token, uint1
     int ignored = !th_shadow_built(ctx->shadow) && open_before == open_after && ctx->changed;
     /* the element the tag names, unless one the tree builder keeps open sits above it */
     Py_ssize_t match = -1;
-    for (Py_ssize_t index = ctx->depth - 1; named && index >= 0; index--) {
+    for (Py_ssize_t index = ctx->depth - 1; named && index >= rw_window_floor(ctx); index--) {
         TH_WORK_STEP();
         const rw_open *open = &ctx->stack[index];
         if (open->shadow != NULL && !open->shadow->left_stack) {
@@ -3011,7 +3011,7 @@ static void rw_handle_end(rw_ctx *ctx, th_token *token) {
             }
         }
         /* find the matching open element, top-down, unless the counts show no open element has its name */
-        for (Py_ssize_t index = ctx->depth - 1; named && index >= 0; index--) {
+        for (Py_ssize_t index = ctx->depth - 1; named && index >= rw_window_floor(ctx); index--) {
             TH_WORK_STEP();
             if (rw_end_names(ctx->stack[index].node, token, atom)) {
                 match = index;
@@ -3225,7 +3225,7 @@ static inline void rw_call_leaf_handler(rw_ctx *ctx, const th_token *token, PyOb
     } else if (handle->set_text != NULL) {
         if (kind == RW_COMMENT) {
             rw_out_ascii(&ctx->out, "<!--");
-            rw_out_str(&ctx->out, handle->set_text);
+            rw_out_raw(&ctx->out, handle->set_text);
             rw_out_ascii(&ctx->out, "-->");
         } else {
             rw_out_content(&ctx->out, handle->set_text, handle->set_text_raw);
@@ -3576,7 +3576,7 @@ int rewrite_register(PyObject *module, module_state *state) {
     if (PyModule_AddObjectRef(module, "_RewriteHandle", state->rewrite_handle_type) < 0) { /* GCOVR_EXCL_BR_LINE */
         return -1;                                                                         /* GCOVR_EXCL_LINE */
     }
-    return PyModule_AddIntConstant(module, "_REWRITE_MAX_DEPTH", RW_MAX_DEPTH);
+    return 0;
 }
 
 /* The tree builder's attribute reads, for the tests that pin the rewriter's trigger to them: a namespace ("html", "svg"

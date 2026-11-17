@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final, assert_type, cast
 import pytest
 from bench.operations import INPUTS
 
-from turbohtml import Document, Element, Text, parse, parse_fragment
+from turbohtml import Document, Element, Range, Text, parse, parse_fragment
 from turbohtml.clean import (
     DEFAULT_CALLBACKS,
     LinkCandidate,
@@ -1035,6 +1035,65 @@ def test_the_string_form_over_a_node_leaves_it_untouched() -> None:
     assert root.inner_html == before
 
 
+_RAW_TEXT_TAGS: Final[tuple[str, ...]] = ("iframe", "noembed", "noframes", "plaintext", "script", "style", "xmp")
+_STRING_FORMS: Final[list[pytest.ParameterSet]] = [
+    pytest.param(linkify, id="linkify"),
+    pytest.param(Linker().linkify, id="linker"),
+    pytest.param(partial(linkify, options=Linkify(parse_email=True)), id="options"),
+]
+
+
+@pytest.mark.parametrize("string_form", _STRING_FORMS)
+@pytest.mark.parametrize("tag", _RAW_TEXT_TAGS)
+def test_the_string_form_escapes_the_text_of_a_raw_text_node(tag: str, string_form: Callable[[Node], str]) -> None:
+    node = Element(tag, None, [Text("one <b>two</b>")])
+    out = string_form(node)
+    assert out == "one &lt;b&gt;two&lt;/b&gt;"
+    assert parse_fragment(out).text == "one <b>two</b>"
+    assert node.inner_html == "one <b>two</b>"
+
+
+@pytest.mark.parametrize("string_form", _STRING_FORMS)
+@pytest.mark.parametrize("tag", _RAW_TEXT_TAGS)
+def test_the_string_form_of_a_raw_text_node_links_its_text_as_a_plain_element_does(
+    tag: str, string_form: Callable[[Node], str]
+) -> None:
+    assert string_form(Element(tag, None, [Text("see http://x.com")])) == string_form(
+        Element("div", None, [Text("see http://x.com")])
+    )
+
+
+@pytest.mark.parametrize("string_form", _STRING_FORMS)
+def test_the_string_form_of_a_parsed_script_reads_back_as_its_text(string_form: Callable[[Node], str]) -> None:
+    node = parse_fragment("<script>if (a < b && c)</script>").select_one("script")
+    assert node is not None
+    assert string_form(node) == "if (a &lt; b &amp;&amp; c)"
+
+
+def test_the_string_form_of_a_raw_text_node_keeps_its_element_children() -> None:
+    node = Element("style", None, [Element("em", None, [Text("yo")]), Text("a<b")])
+    assert linkify(node) == "<em>yo</em>a&lt;b"
+
+
+@pytest.mark.parametrize("tag", ["div", "noscript", "textarea", "title"])
+def test_the_string_form_of_an_escaping_root_is_unchanged(tag: str) -> None:
+    assert linkify(Element(tag, None, [Text("<b>one</b>")])) == "&lt;b&gt;one&lt;/b&gt;"
+
+
+@pytest.mark.parametrize(
+    ("markup", "tag"),
+    [
+        pytest.param("<svg><style>x</style></svg>", "style", id="svg-style"),
+        pytest.param("<math><script>x</script></math>", "script", id="mathml-script"),
+    ],
+)
+def test_the_string_form_of_a_foreign_element_escapes_its_text(markup: str, tag: str) -> None:
+    node = parse_fragment(markup).select_one(tag)
+    assert node is not None
+    node.text = "<b>one</b>"
+    assert linkify(node) == "&lt;b&gt;one&lt;/b&gt;"
+
+
 def test_options_apply_to_the_node_form() -> None:
     root = parse_fragment("<p>mail bob@example.com</p>")
     linkify_node(root, Linkify(parse_email=True))
@@ -1132,9 +1191,39 @@ def test_process_existing_runs_callbacks_over_anchor() -> None:
     assert linkify(html, Linkify(process_existing=True)) == '<a href="http://x.com" rel="nofollow">x</a>'
 
 
+@pytest.mark.parametrize(
+    "name",
+    [pytest.param("\ud800", id="high-surrogate"), pytest.param("a\ud800b", id="surrogate-inside")],
+)
+def test_process_existing_keeps_a_lone_surrogate_attribute(name: str) -> None:
+    tree = parse(f'<a href="http://x.com" {name}="1">x</a>')
+    assert linkify(tree, Linkify(process_existing=True)) == (
+        f'<html><head></head><body><a href="http://x.com" {name}="1" rel="nofollow">x</a></body></html>'
+    )
+
+
 def test_process_existing_veto_unwraps_anchor() -> None:
     html = '<a href="http://x.com">click</a>'
     assert linkify(html, Linkify(callbacks=[lambda _link: None], process_existing=True)) == "click"
+
+
+def test_linkify_node_moves_boundaries_past_the_replaced_text() -> None:
+    doc = parse("<div id=a><p>see example.com ok</p></div>")
+    paragraph = doc.select("p")[0]
+    inside = Range(paragraph.children[0], 14)
+    after = Range(paragraph, 1)
+    linkify_node(doc.select("div")[0], Linkify(callbacks=[]))
+    assert paragraph.html == '<p>see <a href="http://example.com">example.com</a> ok</p>'
+    assert (inside.start_container == paragraph, inside.start_offset) == (True, 3)
+    assert (after.start_container == paragraph, after.start_offset) == (True, 3)
+
+
+def test_vetoed_existing_anchor_moves_a_boundary_in_its_text_to_the_parent() -> None:
+    paragraph = parse('<p>hi <a href="http://x.com">click</a></p>').select("p")[0]
+    inside = Range(paragraph.children[1].children[0], 1)
+    linkify_node(paragraph, Linkify(callbacks=[lambda _link: None], process_existing=True))
+    assert paragraph.html == "<p>hi click</p>"
+    assert (inside.start_container == paragraph, inside.start_offset) == (True, 2)
 
 
 def test_process_existing_can_change_text() -> None:

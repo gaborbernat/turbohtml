@@ -1397,6 +1397,27 @@ def test_concat_chain_frees_the_lexemes_it_supersedes(operand: str) -> None:
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
+        pytest.param('x="a"+"b"+y+("c"+"d")', 'x="ab"+y+"cd"', id="operand-after-prefix-keeps-its-fold"),
+        pytest.param('x="a"+"b"+"\\xZZ"+"c"', 'x="ab"+"\\xZZ"+"c"', id="valueless-escape-after-prefix"),
+        pytest.param('x="a"+"b"+\'c\'+"d"', 'x="ab"+\'c\'+"d"', id="quote-change-after-prefix"),
+        pytest.param('x=1+2+"a"+"b"', 'x=3+"a"+"b"', id="integer-prefix-then-string"),
+        pytest.param('x="a"+y+"b"+"c"', 'x="a"+y+"b"+"c"', id="string-after-non-string-not-joined"),
+        pytest.param('x=a*b+"c"+"d"', 'x=a*b+"c"+"d"', id="product-prefix-not-joined"),
+        pytest.param('f(f(f(f(0))));x="a"+"b"+"c"', 'f(f(f(f(0)))),x="abc"', id="chain-after-deeper-statement"),
+    ],
+)
+def test_concat_chain_joins_its_string_prefix(source: str, expected: str) -> None:
+    assert minify_js(source) == expected
+
+
+@pytest.mark.parametrize("operand", [pytest.param('"ab"', id="short"), pytest.param(f'"{"a" * 40}"', id="long")])
+def test_concat_chain_joins_in_linear_steps(operand: str, work_steps: WorkSteps) -> None:
+    work_steps.assert_linear(lambda n: partial(minify_js, f"x={'+'.join([operand] * n)}"), (200, 800))
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
         # truthiness reads the decoded value, so a line-continuation-only string (value "") is falsy (#436)
         pytest.param(f'"{_BS}{_LF}"?1:2', "2", id="lf-only-empty-falsy"),
         pytest.param(f'"{_BS}{_CR}"?1:2', "2", id="cr-only-empty-falsy"),
@@ -1774,7 +1795,11 @@ def test_declaration_reads_preserve_behavior(source: str, expected: str) -> None
 @pytest.mark.skipif(_NODE is None, reason="node not available")
 @pytest.mark.parametrize(
     ("case", "count"),
-    [pytest.param(0, 256, id="grouped"), pytest.param(1, 256, id="separate"), pytest.param(2, 1, id="single")],
+    [
+        pytest.param(0, 256, id="grouped"),
+        pytest.param(1, 256, id="separate"),
+        pytest.param(2, 128, id="one-declaration"),
+    ],
 )
 def test_single_use_initializers_preserve_call_order(case: int, count: int) -> None:
     source: Final = INPUTS["minify-js-single-use"]()[case][1]
@@ -1787,7 +1812,11 @@ def test_single_use_initializers_preserve_call_order(case: int, count: int) -> N
 @pytest.mark.skipif(_NODE is None, reason="node not available")
 @pytest.mark.parametrize(
     ("case", "count"),
-    [pytest.param(0, 256, id="grouped"), pytest.param(1, 256, id="separate"), pytest.param(2, 1, id="single")],
+    [
+        pytest.param(0, 256, id="grouped"),
+        pytest.param(1, 256, id="separate"),
+        pytest.param(2, 64, id="one-declaration"),
+    ],
 )
 def test_propagation_unlink_preserves_call_order(case: int, count: int) -> None:
     source: Final = INPUTS["minify-js-unlink"]()[case][1]
@@ -1814,7 +1843,7 @@ def test_propagation_unlink_preserves_call_order(case: int, count: int) -> None:
             [[value for index in range(256) for value in (index, index % 10)], list(range(256))],
             id="many",
         ),
-        pytest.param(1, [[0, 0], [0]], id="one"),
+        pytest.param(1, [[v for index in range(80) for v in (index, index % 10)], list(range(80))], id="80"),
         pytest.param(2, [[None] * 256, [None] * 256], id="early"),
     ],
 )
@@ -1827,7 +1856,7 @@ def test_var_initialization_benchmark_order(case: int, rows: list[list[int | Non
 
 
 @pytest.mark.skipif(_NODE is None, reason="node not available")
-@pytest.mark.parametrize(("case", "count"), [pytest.param(0, 256, id="many"), pytest.param(1, 1, id="one")])
+@pytest.mark.parametrize(("case", "count"), [pytest.param(0, 256, id="many"), pytest.param(1, 96, id="few")])
 def test_unused_declarators_preserve_call_order(case: int, count: int) -> None:
     source: Final = INPUTS["minify-js-unused-declarations"]()[case][1]
     assert isinstance(source, str)

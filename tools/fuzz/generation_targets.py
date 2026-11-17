@@ -7,12 +7,10 @@ import re
 from importlib import import_module
 from typing import TYPE_CHECKING, Final
 
-import html5lib
-from html5lib.constants import namespaces
-
 from turbohtml import Node, parse
 
 from .atheris_registry import Target
+from .html5lib_reference import parse_reference
 from .markdown_structure_generators import MarkdownProfileError, markdown_html_check, markdown_source_check
 
 if TYPE_CHECKING:
@@ -74,30 +72,11 @@ def encoding_observation(
         if document.text != unicode_text:
             msg = f"Encoded parser text differs: {document.text!r} != {unicode_text!r}"
             raise AssertionError(msg)
-        # The C tree builder flattens past 512 open elements; html5lib does not.
-        if nesting > 500:
-            return document.text
-        reference: Final = html5lib.parse(decoded, namespaceHTMLElements=False)
+        reference: Final = parse_reference(decoded)
         expected: Final = _reference_text(reference)
-        # html5lib's former in-select rules ignore style and title content that the current HTML parser keeps.
-        if unicode_text != expected and not document.select("select style, select title"):
-            # html5lib leaves an unmatched </p> inside foreign content, then replaces NULs that HTML drops.
-            foreign: Final = tuple(f"{{{namespaces[name]}}}" for name in ("svg", "mathml"))
-            misplaced_p: Final = any(
-                isinstance(parent.tag, str)
-                and parent.tag.startswith(foreign)
-                and any(child.tag == "p" for child in parent)
-                for parent in reference.iter()
-            )
-            without_p_nulls: Final = _WITHOUT_P_NULLS_PATTERN.sub(lambda match: match[0].replace("\0", ""), decoded)
-            if not (
-                "\0" in decoded
-                and "</p>" in decoded.lower()
-                and misplaced_p
-                and unicode_text == _reference_text(html5lib.parse(without_p_nulls, namespaceHTMLElements=False))
-            ):
-                msg = f"Encoded parser text differs: {document.text!r} != {expected!r}"
-                raise AssertionError(msg)
+        if unicode_text != expected:
+            msg = f"Encoded parser text differs: {document.text!r} != {expected!r}"
+            raise AssertionError(msg)
     return document.text
 
 
@@ -127,9 +106,6 @@ def _reference_text(element: Element) -> str:
         else:
             parts.append(child.tail or "")
     return "".join(parts)
-
-
-_WITHOUT_P_NULLS_PATTERN: Final[re.Pattern[str]] = re.compile(r"</p>[^<]*", flags=re.IGNORECASE)
 
 
 __all__ = [

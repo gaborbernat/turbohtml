@@ -2,7 +2,7 @@
    RELAX NG <data> element when it names the XSD datatype library. Included once into
    validate/schema.c; every definition is static. Lexical spaces follow XSD 1.0 part 2;
    numeric facet bounds compare as doubles, which is exact for the value ranges a real
-   schema constrains; date, dateTime, time and duration bounds compare by the order
+   schema constrains; date, dateTime, time, duration and g* bounds compare by the order
    relation XSD gives each type.
 
    whiteSpace runs first (preserve / replace / collapse), then the value is checked
@@ -866,8 +866,12 @@ static int dt_int_in_range(int id, int negative, const Py_UCS4 *digits, Py_ssize
     return 1;
 }
 
-static int dt_is_numeric(int id) {
-    return id == DT_DECIMAL || id == DT_FLOAT || id == DT_DOUBLE || (id >= DT_INTEGER && id <= DT_UNSIGNED_BYTE);
+static int dt_is_float(int id) {
+    return id == DT_FLOAT || id == DT_DOUBLE;
+}
+
+static int dt_is_decimal_family(int id) {
+    return id == DT_DECIMAL || (id >= DT_INTEGER && id <= DT_UNSIGNED_BYTE);
 }
 
 /* `ascii` has room for len + 1 characters. */
@@ -915,8 +919,12 @@ static double dt_value_double(th_schema *schema, const Py_UCS4 *value, Py_ssize_
     return dt_ascii_double(schema->number_buffer, value, len);
 }
 
+static int dt_is_partial(int id) {
+    return id >= DT_G_YEAR && id <= DT_G_DAY;
+}
+
 static int dt_is_ordered(int id) {
-    return id >= DT_DATE && id <= DT_DURATION;
+    return dt_is_decimal_family(id) || (id >= DT_DATE && id <= DT_DURATION) || dt_is_partial(id);
 }
 
 /* How two numbers stand: -1 below, 0 equal, 1 above, and 2 when they are unordered. A NaN is unordered. Past 2^53
@@ -927,6 +935,78 @@ static int dt_cmp(double left, double right) {
         return fabs(left) < 0x1p53 ? 0 : 2;
     }
     return left < right ? -1 : (left > right ? 1 : 2);
+}
+
+/* Whether a float or double keeps one range facet of `side` (1 for a lower bound, -1 for an upper one). XML Schema
+   makes NaN equal to itself and unordered with every other value, so a NaN bound admits only a NaN value, and only for
+   an inclusive facet. */
+static int dt_double_bound_ok(double number, double bound, int side, int inclusive) {
+    if (isnan(number) || isnan(bound)) {
+        return inclusive && isnan(number) && isnan(bound);
+    }
+    return (side > 0 ? number > bound : number < bound) || (inclusive && number == bound);
+}
+
+/* A decimal literal split into its sign and the digits before and after its point, with the zeros that carry no value
+   removed: leading zeros of the whole part and trailing zeros of the fraction. */
+typedef struct {
+    int negative;
+    const Py_UCS4 *whole, *fraction;
+    Py_ssize_t whole_len, fraction_len;
+} dt_decimal;
+
+/* `value` has passed the lexical check, so it is non-empty and holds nothing after its whole part but the point. */
+static dt_decimal dt_decimal_of(const Py_UCS4 *value, Py_ssize_t len) {
+    dt_decimal number = {0};
+    number.negative = value[0] == '-';
+    Py_ssize_t index = value[0] == '+' || value[0] == '-';
+    const Py_ssize_t start = index;
+    while (index < len && is_digit(value[index])) {
+        index++;
+    }
+    number.whole = value + start;
+    number.whole_len = index - start;
+    while (number.whole_len > 0 && number.whole[0] == '0') {
+        number.whole++;
+        number.whole_len--;
+    }
+    if (index < len) {
+        number.fraction = value + index + 1;
+        number.fraction_len = len - index - 1;
+        while (number.fraction_len > 0 && number.fraction[number.fraction_len - 1] == '0') {
+            number.fraction_len--;
+        }
+    }
+    number.negative = number.negative && (number.whole_len > 0 || number.fraction_len > 0);
+    return number;
+}
+
+/* The order of two digit runs read from the left, where a run that ends first sorts before a longer one it starts. */
+static int dt_digits_cmp(const Py_UCS4 *left, Py_ssize_t left_len, const Py_UCS4 *right, Py_ssize_t right_len) {
+    for (Py_ssize_t index = 0; index < left_len && index < right_len; index++) {
+        if (left[index] != right[index]) {
+            return left[index] < right[index] ? -1 : 1;
+        }
+    }
+    return left_len == right_len ? 0 : (left_len < right_len ? -1 : 1);
+}
+
+/* The exact order of two decimal literals. A double cannot tell apart two long decimals that round alike, nor a tiny
+   one from zero, so the digits are compared as written. */
+static int dt_decimal_compare(const dt_decimal *a, const dt_decimal *b) {
+    if (a->negative != b->negative) {
+        return a->negative ? -1 : 1;
+    }
+    int magnitude;
+    if (a->whole_len != b->whole_len) {
+        magnitude = a->whole_len < b->whole_len ? -1 : 1;
+    } else {
+        magnitude = dt_digits_cmp(a->whole, a->whole_len, b->whole, b->whole_len);
+    }
+    if (magnitude == 0) {
+        magnitude = dt_digits_cmp(a->fraction, a->fraction_len, b->fraction, b->fraction_len);
+    }
+    return a->negative ? -magnitude : magnitude;
 }
 
 /* The number the run of digits at `*at` writes, leaving `*at` on the character that ends the run. A year and a
@@ -961,8 +1041,62 @@ typedef struct {
     int zoned;
 } dt_moment;
 
+/* Moves `moment` to UTC when the timezone that starts at `at` is present. */
+static void dt_moment_zone(dt_moment *moment, const Py_UCS4 *value, Py_ssize_t at, Py_ssize_t len) {
+    moment->zoned = at < len;
+    if (moment->zoned && value[at] != 'Z') {
+        const int offset = fixed_digits(value, at + 1, 2, 0, 23) * 3600 + fixed_digits(value, at + 4, 2, 0, 59) * 60;
+        moment->seconds += value[at] == '-' ? offset : -offset;
+    }
+}
+
+/* A g* value on the timeline. XSD 1.1 Part 2 appendix D.2.1 fills each absent field from 1972-12-31T00:00:00, and an
+   absent day with the last day of its month, so a value's place depends only on the fields it states. `value` has
+   passed dt_check_lexical for `id`. */
+static dt_moment dt_partial_moment_of(int id, const Py_UCS4 *value, Py_ssize_t len) {
+    dt_moment moment = {0, NULL, 0, 0};
+    const int negative = value[0] == '-';
+    Py_ssize_t year_end = negative;
+    double year = 1972;
+    if (id == DT_G_YEAR || id == DT_G_YEAR_MONTH) {
+        year = dt_digit_run(value, &year_end);
+        year = negative ? -year : year;
+    }
+    int month = 12, day = 31;
+    Py_ssize_t zone = year_end;
+    switch (id) {
+    case DT_G_YEAR:
+        break;
+    case DT_G_YEAR_MONTH:
+        month = fixed_digits(value, year_end + 1, 2, 1, 12);
+        day = days_in_month(month, value + negative, year_end - negative);
+        zone = year_end + 3;
+        break;
+    case DT_G_MONTH:
+        month = fixed_digits(value, 2, 2, 1, 12);
+        day = days_in_month(month, NULL, 0);
+        zone = 4;
+        break;
+    case DT_G_MONTH_DAY:
+        month = fixed_digits(value, 2, 2, 1, 12);
+        day = fixed_digits(value, 5, 2, 1, 31);
+        zone = 7;
+        break;
+    default:
+        day = fixed_digits(value, 3, 2, 1, 31);
+        zone = 5;
+        break;
+    }
+    moment.seconds = (dt_month_days(year * 12 + month - 1) + day) * 86400;
+    dt_moment_zone(&moment, value, zone, len);
+    return moment;
+}
+
 /* `value` has passed dt_check_lexical for `id`, which fixes where each field sits. */
 static dt_moment dt_moment_of(int id, const Py_UCS4 *value, Py_ssize_t len) {
+    if (dt_is_partial(id)) {
+        return dt_partial_moment_of(id, value, len);
+    }
     dt_moment moment = {0, NULL, 0, 0};
     Py_ssize_t at = 0;
     if (id != DT_TIME) {
@@ -986,11 +1120,7 @@ static dt_moment dt_moment_of(int id, const Py_UCS4 *value, Py_ssize_t len) {
             moment.fraction_len = value + at - moment.fraction;
         }
     }
-    moment.zoned = at < len;
-    if (moment.zoned && value[at] != 'Z') {
-        const int offset = fixed_digits(value, at + 1, 2, 0, 23) * 3600 + fixed_digits(value, at + 4, 2, 0, 59) * 60;
-        moment.seconds += value[at] == '-' ? offset : -offset;
-    }
+    dt_moment_zone(&moment, value, at, len);
     return moment;
 }
 
@@ -1087,18 +1217,32 @@ static int dt_span_cmp(const dt_span *left, const dt_span *right) {
     return order;
 }
 
+/* A range facet's text is the schema's, not yet collapsed: its surrounding whitespace is not part of the bound. */
+static void dt_trim_bound(const Py_UCS4 **bound, Py_ssize_t *bound_len) {
+    while (*bound_len > 0 && is_xml_space((*bound)[*bound_len - 1])) {
+        (*bound_len)--;
+    }
+    while (*bound_len > 0 && is_xml_space((*bound)[0])) {
+        (*bound)++;
+        (*bound_len)--;
+    }
+}
+
+static int dt_decimal_bound(const Py_UCS4 *bound, Py_ssize_t bound_len, dt_decimal *digits) {
+    dt_trim_bound(&bound, &bound_len);
+    if (!dt_check_lexical(DT_DECIMAL, bound, bound_len)) {
+        return 0;
+    }
+    *digits = dt_decimal_of(bound, bound_len);
+    return 1;
+}
+
 /* How `value`, which has passed dt_check_lexical for the dt_is_ordered type `id`, stands to a range facet's bound:
    -1 below, 0 equal, 1 above. 2 says that the type's order relation does not place the two -- a month against a
    count of days, a value with a timezone within fourteen hours of one without (XSD 1.0 part 2 sections 3.2.6.2 and
    3.2.7.4) -- or that the bound is no value of the type, and then no range facet holds. */
 static int dt_order(int id, const Py_UCS4 *value, Py_ssize_t len, const Py_UCS4 *bound, Py_ssize_t bound_len) {
-    while (bound_len > 0 && is_xml_space(bound[bound_len - 1])) { /* the schema's text, not yet collapsed */
-        bound_len--;
-    }
-    while (bound_len > 0 && is_xml_space(bound[0])) {
-        bound++;
-        bound_len--;
-    }
+    dt_trim_bound(&bound, &bound_len);
     if (!dt_check_lexical(id, bound, bound_len)) {
         return 2;
     }
@@ -1124,19 +1268,31 @@ typedef struct {
     Py_ssize_t len;
 } strspan;
 
+enum { RANGE_MIN_INCLUSIVE, RANGE_MAX_INCLUSIVE, RANGE_MIN_EXCLUSIVE, RANGE_MAX_EXCLUSIVE, RANGE_COUNT };
+
+/* A range facet's bound as the schema wrote it. A decimal or integer type compares against `digits`, read once when the
+   schema compiles; `valid` is 0 when the bound is not a decimal literal, and such a bound admits no value. */
+typedef struct {
+    strspan text;
+    int valid;
+    dt_decimal digits;
+} facet_range;
+
+typedef struct {
+    Py_ssize_t length, min_length, max_length, total_digits, fraction_digits;
+} facet_limits;
+
 typedef struct {
     int base_id;
     int ws;
-    int has_length, length;
-    int has_min_length, min_length;
-    int has_max_length, max_length;
+    int has_length, has_min_length, has_max_length;
     int has_min_inclusive, has_max_inclusive, has_min_exclusive, has_max_exclusive;
     double min_inclusive, max_inclusive, min_exclusive, max_exclusive;
     /* the bounds as the schema wrote them, by RANGE_ slot: a date's, time's or duration's order is not a double's.
        Held in the arena so the facetset that every simple value zeroes stays small. */
-    strspan *range_text;
-    int has_total_digits, total_digits;
-    int has_fraction_digits, fraction_digits;
+    facet_range *ranges;
+    facet_limits *limits;
+    int has_total_digits, has_fraction_digits;
     strspan *enums;
     Py_ssize_t enum_count, enum_cap;
     strspan *patterns;
@@ -1168,16 +1324,46 @@ static int strspan_push(arena *mem, strspan **items, Py_ssize_t *count, Py_ssize
     return 0;
 }
 
-enum { RANGE_MIN_INCLUSIVE, RANGE_MAX_INCLUSIVE, RANGE_MIN_EXCLUSIVE, RANGE_MAX_EXCLUSIVE, RANGE_COUNT };
-
 static int facet_range_text(arena *mem, facetset *facets, int slot, const Py_UCS4 *value, Py_ssize_t value_len) {
-    if (facets->range_text == NULL) {
-        facets->range_text = arena_alloc(mem, RANGE_COUNT * sizeof(strspan));
-        if (facets->range_text == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
-            return -1;                    /* GCOVR_EXCL_LINE */
+    if (facets->ranges == NULL) {
+        facets->ranges = arena_alloc(mem, RANGE_COUNT * sizeof(facet_range));
+        if (facets->ranges == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                /* GCOVR_EXCL_LINE */
         }
     }
-    facets->range_text[slot] = (strspan){value, value_len};
+    facet_range *range = &facets->ranges[slot];
+    range->text = (strspan){value, value_len};
+    range->valid = dt_decimal_bound(value, value_len, &range->digits);
+    return 0;
+}
+
+/* A length or digit-count limit, read as the integer it starts with. A limit past Py_ssize_t saturates: no value has
+   that many characters or digits, so the verdict is unchanged. */
+static Py_ssize_t facet_limit(const Py_UCS4 *value, Py_ssize_t len) {
+    Py_ssize_t index = 0;
+    while (index < len && is_xml_space(value[index])) {
+        index++;
+    }
+    const int negative = index < len && value[index] == '-';
+    if (index < len && (value[index] == '+' || value[index] == '-')) {
+        index++;
+    }
+    Py_ssize_t limit = 0;
+    while (index < len && is_digit(value[index])) {
+        const Py_ssize_t digit = value[index++] - '0';
+        limit = limit > (PY_SSIZE_T_MAX - digit) / 10 ? PY_SSIZE_T_MAX : limit * 10 + digit;
+    }
+    return negative ? -limit : limit;
+}
+
+/* The length and digit-count limits of a facetset, allocated on the first of them it takes. */
+static int facet_limits_at(arena *mem, facetset *facets) {
+    if (facets->limits == NULL) {
+        facets->limits = arena_alloc(mem, sizeof(facet_limits));
+        if (facets->limits == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                /* GCOVR_EXCL_LINE */
+        }
+    }
     return 0;
 }
 
@@ -1193,14 +1379,23 @@ static int facet_add(arena *mem, facetset *facets, const Py_UCS4 *name, Py_ssize
     if (u_eq_ascii(name, name_len, "whiteSpace")) {
         facets->ws = u_eq_ascii(value, value_len, "replace") ? 1 : (u_eq_ascii(value, value_len, "collapse") ? 2 : 0);
     } else if (u_eq_ascii(name, name_len, "length")) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_length = 1;
-        facets->length = (int)dt_to_double(mem, value, value_len);
+        facets->limits->length = facet_limit(value, value_len);
     } else if (u_eq_ascii(name, name_len, "minLength")) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_min_length = 1;
-        facets->min_length = (int)dt_to_double(mem, value, value_len);
+        facets->limits->min_length = facet_limit(value, value_len);
     } else if (u_eq_ascii(name, name_len, "maxLength")) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_max_length = 1;
-        facets->max_length = (int)dt_to_double(mem, value, value_len);
+        facets->limits->max_length = facet_limit(value, value_len);
     } else if (u_eq_ascii(name, name_len, "minInclusive")) {
         if (facet_range_text(mem, facets, RANGE_MIN_INCLUSIVE, value, value_len) < 0) { /* GCOVR_EXCL_BR_LINE */
             return -1;                                                                  /* GCOVR_EXCL_LINE */
@@ -1226,11 +1421,17 @@ static int facet_add(arena *mem, facetset *facets, const Py_UCS4 *name, Py_ssize
         facets->has_max_exclusive = 1;
         facets->max_exclusive = dt_to_double(mem, value, value_len);
     } else if (u_eq_ascii(name, name_len, "totalDigits")) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_total_digits = 1;
-        facets->total_digits = (int)dt_to_double(mem, value, value_len);
+        facets->limits->total_digits = facet_limit(value, value_len);
     } else if (u_eq_ascii(name, name_len, "fractionDigits")) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_fraction_digits = 1;
-        facets->fraction_digits = (int)dt_to_double(mem, value, value_len);
+        facets->limits->fraction_digits = facet_limit(value, value_len);
     }
     return 0;
 }
@@ -1238,66 +1439,88 @@ static int facet_add(arena *mem, facetset *facets, const Py_UCS4 *name, Py_ssize
 /* Fold the scalar facets and whiteSpace rule `own` states into `facets`, replacing what an earlier derivation stated.
    `own->ws` is -1 when it states no whiteSpace. */
 static int facet_inherit(arena *mem, facetset *facets, const facetset *own) {
-    if (own->range_text != NULL && facets->range_text == NULL) {
-        facets->range_text = arena_alloc(mem, RANGE_COUNT * sizeof(strspan));
-        if (facets->range_text == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
-            return -1;                    /* GCOVR_EXCL_LINE */
+    if (own->ranges != NULL && facets->ranges == NULL) {
+        facets->ranges = arena_alloc(mem, RANGE_COUNT * sizeof(facet_range));
+        if (facets->ranges == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                /* GCOVR_EXCL_LINE */
         }
     }
     if (own->ws >= 0 && !dt_is_list(facets->base_id)) {
         facets->ws = own->ws;
     }
     if (own->has_length) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_length = 1;
-        facets->length = own->length;
+        facets->limits->length = own->limits->length;
     }
     if (own->has_min_length) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_min_length = 1;
-        facets->min_length = own->min_length;
+        facets->limits->min_length = own->limits->min_length;
     }
     if (own->has_max_length) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_max_length = 1;
-        facets->max_length = own->max_length;
+        facets->limits->max_length = own->limits->max_length;
     }
     if (own->has_min_inclusive) {
         facets->has_min_inclusive = 1;
         facets->min_inclusive = own->min_inclusive;
-        facets->range_text[RANGE_MIN_INCLUSIVE] = own->range_text[RANGE_MIN_INCLUSIVE];
+        facets->ranges[RANGE_MIN_INCLUSIVE] = own->ranges[RANGE_MIN_INCLUSIVE];
     }
     if (own->has_max_inclusive) {
         facets->has_max_inclusive = 1;
         facets->max_inclusive = own->max_inclusive;
-        facets->range_text[RANGE_MAX_INCLUSIVE] = own->range_text[RANGE_MAX_INCLUSIVE];
+        facets->ranges[RANGE_MAX_INCLUSIVE] = own->ranges[RANGE_MAX_INCLUSIVE];
     }
     if (own->has_min_exclusive) {
         facets->has_min_exclusive = 1;
         facets->min_exclusive = own->min_exclusive;
-        facets->range_text[RANGE_MIN_EXCLUSIVE] = own->range_text[RANGE_MIN_EXCLUSIVE];
+        facets->ranges[RANGE_MIN_EXCLUSIVE] = own->ranges[RANGE_MIN_EXCLUSIVE];
     }
     if (own->has_max_exclusive) {
         facets->has_max_exclusive = 1;
         facets->max_exclusive = own->max_exclusive;
-        facets->range_text[RANGE_MAX_EXCLUSIVE] = own->range_text[RANGE_MAX_EXCLUSIVE];
+        facets->ranges[RANGE_MAX_EXCLUSIVE] = own->ranges[RANGE_MAX_EXCLUSIVE];
     }
     if (own->has_total_digits) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_total_digits = 1;
-        facets->total_digits = own->total_digits;
+        facets->limits->total_digits = own->limits->total_digits;
     }
     if (own->has_fraction_digits) {
+        if (facet_limits_at(mem, facets) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return -1;                          /* GCOVR_EXCL_LINE */
+        }
         facets->has_fraction_digits = 1;
-        facets->fraction_digits = own->fraction_digits;
+        facets->limits->fraction_digits = own->limits->fraction_digits;
     }
     return 0;
 }
 
 /* Whether a value of a dt_is_ordered type keeps one range facet: `side` is 1 for a lower bound and -1 for an upper
    one. A value the order relation does not place against the bound keeps none. */
-static int facet_bound_ok(int id, const Py_UCS4 *value, Py_ssize_t len, strspan bound, int side, int inclusive) {
-    const int order = dt_order(id, value, len, bound.ptr, bound.len);
+static int facet_bound_ok(int id, const facetset *facets, int slot, const Py_UCS4 *value, Py_ssize_t len,
+                          const dt_decimal *number, int side, int inclusive) {
+    const facet_range *range = &facets->ranges[slot];
+    int order;
+    if (dt_is_decimal_family(id)) {
+        order = range->valid ? dt_decimal_compare(number, &range->digits) : 2;
+    } else {
+        order = dt_order(id, value, len, range->text.ptr, range->text.len);
+    }
     return order == side || (inclusive && order == 0);
 }
 
-static void count_digits(const Py_UCS4 *value, Py_ssize_t len, int *total, int *fraction) {
+static void count_digits(const Py_UCS4 *value, Py_ssize_t len, Py_ssize_t *total, Py_ssize_t *fraction) {
     *total = 0;
     *fraction = 0;
     int after_point = 0;
@@ -1329,71 +1552,69 @@ typedef struct {
 static int facet_check(valctx *ctx, th_node *node, const facetset *facets, const facet_levels *levels,
                        const Py_UCS4 *value, Py_ssize_t len, Py_ssize_t units) {
     int ok = 1;
-    if (facets->has_length && units != facets->length) {
-        report(ctx, node, "facet", "value length %zd does not equal length facet %d", units, facets->length);
+    if (facets->has_length && units != facets->limits->length) {
+        report(ctx, node, "facet", "value length %zd does not equal length facet %zd", units, facets->limits->length);
         ok = 0;
     }
-    if (facets->has_min_length && units < facets->min_length) {
-        report(ctx, node, "facet", "value length %zd is below minLength %d", units, facets->min_length);
+    if (facets->has_min_length && units < facets->limits->min_length) {
+        report(ctx, node, "facet", "value length %zd is below minLength %zd", units, facets->limits->min_length);
         ok = 0;
     }
-    if (facets->has_max_length && units > facets->max_length) {
-        report(ctx, node, "facet", "value length %zd exceeds maxLength %d", units, facets->max_length);
+    if (facets->has_max_length && units > facets->limits->max_length) {
+        report(ctx, node, "facet", "value length %zd exceeds maxLength %zd", units, facets->limits->max_length);
         ok = 0;
     }
-    if (dt_is_numeric(facets->base_id) && (facets->has_min_inclusive || facets->has_max_inclusive ||
-                                           facets->has_min_exclusive || facets->has_max_exclusive)) {
+    if (dt_is_float(facets->base_id) && (facets->has_min_inclusive || facets->has_max_inclusive ||
+                                         facets->has_min_exclusive || facets->has_max_exclusive)) {
         double number = dt_value_double(ctx->schema, value, len);
-        /* negated so an unordered NaN fails every bound: XSD excludes NaN from a bounded float or double */
-        if (facets->has_min_inclusive && !(number >= facets->min_inclusive)) {
+        if (facets->has_min_inclusive && !dt_double_bound_ok(number, facets->min_inclusive, 1, 1)) {
             report(ctx, node, "facet", "value is below minInclusive");
             ok = 0;
         }
-        if (facets->has_max_inclusive && !(number <= facets->max_inclusive)) {
+        if (facets->has_max_inclusive && !dt_double_bound_ok(number, facets->max_inclusive, -1, 1)) {
             report(ctx, node, "facet", "value is above maxInclusive");
             ok = 0;
         }
-        if (facets->has_min_exclusive && !(number > facets->min_exclusive)) {
+        if (facets->has_min_exclusive && !dt_double_bound_ok(number, facets->min_exclusive, 1, 0)) {
             report(ctx, node, "facet", "value is not above minExclusive");
             ok = 0;
         }
-        if (facets->has_max_exclusive && !(number < facets->max_exclusive)) {
+        if (facets->has_max_exclusive && !dt_double_bound_ok(number, facets->max_exclusive, -1, 0)) {
             report(ctx, node, "facet", "value is not below maxExclusive");
             ok = 0;
         }
-    } else if (dt_is_ordered(facets->base_id)) {
+    } else if (dt_is_ordered(facets->base_id) && (facets->has_min_inclusive || facets->has_max_inclusive ||
+                                                  facets->has_min_exclusive || facets->has_max_exclusive)) {
         const int id = facets->base_id;
-        if (facets->has_min_inclusive &&
-            !facet_bound_ok(id, value, len, facets->range_text[RANGE_MIN_INCLUSIVE], 1, 1)) {
+        const dt_decimal number = dt_is_decimal_family(id) ? dt_decimal_of(value, len) : (dt_decimal){0};
+        if (facets->has_min_inclusive && !facet_bound_ok(id, facets, RANGE_MIN_INCLUSIVE, value, len, &number, 1, 1)) {
             report(ctx, node, "facet", "value is below minInclusive");
             ok = 0;
         }
-        if (facets->has_max_inclusive &&
-            !facet_bound_ok(id, value, len, facets->range_text[RANGE_MAX_INCLUSIVE], -1, 1)) {
+        if (facets->has_max_inclusive && !facet_bound_ok(id, facets, RANGE_MAX_INCLUSIVE, value, len, &number, -1, 1)) {
             report(ctx, node, "facet", "value is above maxInclusive");
             ok = 0;
         }
-        if (facets->has_min_exclusive &&
-            !facet_bound_ok(id, value, len, facets->range_text[RANGE_MIN_EXCLUSIVE], 1, 0)) {
+        if (facets->has_min_exclusive && !facet_bound_ok(id, facets, RANGE_MIN_EXCLUSIVE, value, len, &number, 1, 0)) {
             report(ctx, node, "facet", "value is not above minExclusive");
             ok = 0;
         }
-        if (facets->has_max_exclusive &&
-            !facet_bound_ok(id, value, len, facets->range_text[RANGE_MAX_EXCLUSIVE], -1, 0)) {
+        if (facets->has_max_exclusive && !facet_bound_ok(id, facets, RANGE_MAX_EXCLUSIVE, value, len, &number, -1, 0)) {
             report(ctx, node, "facet", "value is not below maxExclusive");
             ok = 0;
         }
     }
     if (facets->has_total_digits || facets->has_fraction_digits) {
-        int total, fraction;
+        Py_ssize_t total, fraction;
         count_digits(value, len, &total, &fraction);
-        if (facets->has_total_digits && total > facets->total_digits) {
-            report(ctx, node, "facet", "value has more than totalDigits %d significant digits", facets->total_digits);
+        if (facets->has_total_digits && total > facets->limits->total_digits) {
+            report(ctx, node, "facet", "value has more than totalDigits %zd significant digits",
+                   facets->limits->total_digits);
             ok = 0;
         }
-        if (facets->has_fraction_digits && fraction > facets->fraction_digits) {
-            report(ctx, node, "facet", "value has more than fractionDigits %d fraction digits",
-                   facets->fraction_digits);
+        if (facets->has_fraction_digits && fraction > facets->limits->fraction_digits) {
+            report(ctx, node, "facet", "value has more than fractionDigits %zd fraction digits",
+                   facets->limits->fraction_digits);
             ok = 0;
         }
     }

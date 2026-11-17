@@ -325,10 +325,10 @@ static void set_ident(P *parser, int32_t node) {
 static int32_t leaf(P *parser, jm_kind kind) {
     int32_t index = jm_node_new(parser->prog, kind);
     if (kind == JN_IDENT) {
-        /* Only a value-bearing token names anything: at a punctuator lx.text still spans the last token that did,
-           so the name read there would be an earlier token's. Punctuators follow the value-bearing kinds in jm_tok,
-           and the end of input is let through, since its text is empty and repeats no earlier name. */
-        if (parser->lx.kind > JT_TEMPLATE_TAIL) {
+        /* Only the kinds up to a private name can stand for a property name: literals and punctuators follow them in
+           jm_tok, and a string, number or template is a key only where parse_key takes it as a literal. The end of
+           input has no text and repeats no earlier name, so it passes as it did before. */
+        if (parser->lx.kind > JT_PRIVATE) {
             fail(parser, "expected property name");
         }
         set_ident(parser, index);
@@ -1653,7 +1653,8 @@ static int32_t parse_object(P *parser) {
                 is_set = kw(parser, "set");
                 is_async = kw(parser, "async");
                 advance(parser);
-                if (at(parser, JT_COLON) || at(parser, JT_COMMA) || at(parser, JT_RBRACE) || at(parser, JT_LPAREN)) {
+                if (at(parser, JT_COLON) || at(parser, JT_COMMA) || at(parser, JT_RBRACE) || at(parser, JT_LPAREN) ||
+                    at(parser, JT_ASSIGN)) {
                     reset(parser, save); /* it was actually a property named get/set/async */
                     is_get = is_set = is_async = 0;
                 }
@@ -1729,7 +1730,7 @@ static void parse_key(P *parser, int32_t owner) {
         parser->prog->nodes[owner].flags |= JN_F_COMPUTED;
         set_a(parser, owner, parse_assign(parser, 0));
         expect(parser, JT_RBRACK, "expected ]");
-    } else if (at(parser, JT_STRING) || at(parser, JT_NUM)) {
+    } else if (at(parser, JT_STRING) || at(parser, JT_NUM) || at(parser, JT_BIGINT)) {
         set_a(parser, owner, leaf(parser, at(parser, JT_STRING) ? JN_STRING : JN_NUM));
     } else {
         set_a(parser, owner, leaf(parser, JN_IDENT));

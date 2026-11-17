@@ -65,6 +65,26 @@ def _sheet(body: str, *, method: str = "text", declare: str = "", prefix: str = 
     return turbohtml.parse_xml(text)
 
 
+def test_transform_pattern_with_a_prefixed_positional_predicate_agrees_with_the_plain_walk() -> None:
+    source = '<r xmlns:q="urn:q"><q:b><a><q:b><a/></q:b></a></q:b><a/></r>'
+    declare = 'xmlns:q="urn:q"'
+    apply = '<xsl:template match="/"><xsl:apply-templates select="//a"/></xsl:template>'
+    prefixed = f'{apply}<xsl:template match="a[ancestor::q:b[2]]">hit </xsl:template>'
+    plain = f'{apply}<xsl:template match="a[ancestor::*[self::q:b][position() &gt; 0][2]]">hit </xsl:template>'
+    assert Transform(_sheet(prefixed, declare=declare))(turbohtml.parse_xml(source)) == "hit hit "
+    assert Transform(_sheet(plain, declare=declare))(turbohtml.parse_xml(source)) == "hit hit "
+
+
+def test_transform_key_with_a_prefixed_predicate_indexes_the_nodes_it_matches() -> None:
+    source = '<r xmlns:q="urn:q"><q:b><a i="1"><q:b><a i="2"/></q:b></a></q:b><a i="3"/></r>'
+    body = (
+        '<xsl:key name="k" match="a[ancestor::q:b]" use="@i"/>'
+        "<xsl:template match=\"/\"><xsl:value-of select=\"count(key('k', '1'))\"/>"
+        "<xsl:value-of select=\"count(key('k', '3'))\"/></xsl:template>"
+    )
+    assert Transform(_sheet(body, declare='xmlns:q="urn:q"'))(turbohtml.parse_xml(source)) == "10"
+
+
 def test_transform_apply_templates_default_children() -> None:
     body = (
         '<xsl:template match="/"><xsl:apply-templates/></xsl:template>'
@@ -3400,6 +3420,30 @@ def test_transform_exclude_result_prefixes_drops_only_listed() -> None:
             id="xslt-directive-does-not-keep-xslt-namespace",
         ),
         pytest.param(
+            'xmlns:p="urn:p"',
+            '<out xmlns:p="urn:p" xsl:exclude-result-prefixes="p"/>',
+            "<out/>",
+            id="literal-exclusion-unused-prefix",
+        ),
+        pytest.param(
+            'xmlns:p="urn:p"',
+            '<out xsl:exclude-result-prefixes="p"><c/></out>',
+            "<out><c/></out>",
+            id="literal-exclusion-inherited",
+        ),
+        pytest.param(
+            'xmlns:p="urn:p"',
+            '<out xsl:exclude-result-prefixes="p"><p:c/></out>',
+            '<out><p:c xmlns:p="urn:p"/></out>',
+            id="literal-exclusion-used-by-child",
+        ),
+        pytest.param(
+            'xmlns:p="urn:p" xmlns:q="urn:q"',
+            '<out xsl:exclude-result-prefixes="p"><q:c/></out>',
+            '<out xmlns:q="urn:q"><q:c/></out>',
+            id="literal-exclusion-lists-other-prefix",
+        ),
+        pytest.param(
             'xmlns:q="urn:q" exclude-result-prefixes="#default q"',
             "<out/>",
             "<out/>",
@@ -4643,6 +4687,24 @@ def test_transform_import_loads_external_templates(tmp_path: Path) -> None:
     sheet = turbohtml.parse_xml(main.read_text(encoding="utf-8"))
     result = transform(sheet, turbohtml.parse_xml("<r><a>x</a></r>"), base_url=str(main), import_root=tmp_path)
     assert _canon(result) == "[x]"
+
+
+def test_transform_import_literal_exclusion_applies_to_imported_template(tmp_path: Path) -> None:
+    (tmp_path / "base.xsl").write_text(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:p="urn:p">'
+        '<xsl:template match="a"><out xsl:exclude-result-prefixes="p"/></xsl:template></xsl:stylesheet>',
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.xsl"
+    main.write_text(
+        '<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+        '<xsl:import href="base.xsl"/>'
+        '<xsl:template match="/"><xsl:apply-templates select="r/a"/></xsl:template></xsl:stylesheet>',
+        encoding="utf-8",
+    )
+    sheet = turbohtml.parse_xml(main.read_text(encoding="utf-8"))
+    result = transform(sheet, turbohtml.parse_xml("<r><a/></r>"), base_url=str(main), import_root=tmp_path)
+    assert _canon(result) == "<out/>"
 
 
 def test_transform_import_can_be_disabled(tmp_path: Path) -> None:

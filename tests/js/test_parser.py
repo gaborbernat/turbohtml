@@ -233,6 +233,49 @@ def test_punctuator_as_property_name_raises(source: str, match: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("source", "match"),
+    [
+        pytest.param("o={`t`:1}", "expected property name at offset 3 near '`t`'", id="object-template-key"),
+        pytest.param("class C{`t`(){}}", "expected property name at offset 8 near '`t`'", id="class-template-key"),
+        pytest.param("x=a.`t`", "expected property name at offset 4 near '`t`'", id="template-member-name"),
+        pytest.param("x=a?.`t`", "expected property name at offset 5 near '`t`'", id="template-optional-member-name"),
+        pytest.param("x=new.`t`", "expected property name at offset 6 near '`t`'", id="template-new-meta-property"),
+        pytest.param('x=a."b"', "expected property name at offset 4 near '\"b\"'", id="string-member-name"),
+        pytest.param('x=a?."b"', "expected property name at offset 5 near '\"b\"'", id="string-optional-member-name"),
+        pytest.param('x=new."b"', "expected property name at offset 6 near '\"b\"'", id="string-new-meta-property"),
+        pytest.param(
+            'o."\\u{1234567}"',
+            "expected property name at offset 2 near '\"\\u{1234567}\"'",
+            id="escaped-string-member-name",
+        ),
+        pytest.param(
+            "x.`a\\u{120000}`",
+            "expected property name at offset 2 near '`a\\u{120000}`'",
+            id="escaped-template-member-name",
+        ),
+        pytest.param("x=o={/a/:1}", "expected property name at offset 5 near '/'", id="regex-object-key"),
+        pytest.param("x=class{/a/(){}}", "expected property name at offset 8 near '/'", id="regex-class-key"),
+    ],
+)
+def test_literal_token_as_property_name_raises(source: str, match: str) -> None:
+    # only an identifier name, or a string, number or bigint key that parse_key reads as a literal, names a property
+    with pytest.raises(ValueError, match=re.escape(match)):
+        minify_js(source)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param('x={"a":1,1:2,1n:3,[k]:4}', "x={a:1,1:2,1n:3,[k]:4}", id="object-literal-keys"),
+        pytest.param('class C{"m"(){}1(){}2n(){}}', "class C{m(){}1(){}2n(){}}", id="class-literal-keys"),
+        pytest.param('x=a?.["b"]', "x=a?.b", id="computed-string-optional-member"),
+    ],
+)
+def test_literal_property_names_minify_to(source: str, expected: str) -> None:
+    assert minify_js(source) == expected
+
+
+@pytest.mark.parametrize(
     ("source", "expected"),
     [
         pytest.param("x={abc,b,}", "x={abc,b}", id="trailing-comma"),
@@ -300,10 +343,6 @@ def test_identifier_escape_decodes(source: str, expected: str) -> None:
         pytest.param("x.#\\u0030", "offset 2 near '#\\u0030'", id="digit-leads-private-name"),
         pytest.param("({k\\u{1FFFFF}:0})", "offset 2 near 'k\\u{1FFFFF}'", id="object-key"),
         pytest.param("class K{#n\\u{2A0000};}", "offset 8 near '#n\\u{2A0000}'", id="private-field"),
-        # the parser reads whatever token follows a `.` as the property name, so a literal's escapes arrive here too
-        pytest.param('o."\\u{1234567}"', "offset 2 near '\"\\u{1234567}\"'", id="string-for-a-name"),
-        pytest.param('x."\\n"', "offset 2 near '\"\\n\"'", id="string-escape-that-is-not-u"),
-        pytest.param("x.`a\\u{120000}`", "offset 2 near '`a\\u{120000}`'", id="template-for-a-name"),
     ],
 )
 def test_invalid_identifier_escape_raises(source: str, match: str) -> None:
@@ -621,6 +660,63 @@ def test_nested_group_before_non_arrow_raises() -> None:
 )
 def test_constructs_minify_to(source: str, expected: str) -> None:
     assert minify(source) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param("var {get = 1} = o;", "var {get=1}=o", id="get-default-binding"),
+        pytest.param("var {set = 1} = o;", "var {set=1}=o", id="set-default-binding"),
+        pytest.param("var {async = 1} = o;", "var {async=1}=o", id="async-default-binding"),
+        pytest.param("let {async = 3} = o;", "let {async=3}=o", id="let-async-default"),
+        pytest.param("const {get = 4} = o;", "const {get=4}=o", id="const-get-default"),
+        pytest.param("var {get = 1, set = 2, async = 3} = o;", "var {get=1,set=2,async=3}=o", id="all-three-defaults"),
+        pytest.param("var {get, set = 2, async} = o;", "var {get,set=2,async}=o", id="plain-and-default-mixed"),
+        pytest.param("var {get = 1 + 2} = o;", "var {get=1+2}=o", id="default-expression"),
+        pytest.param("var {a: {get = 1}} = o;", "var {a:{get=1}}=o", id="nested-pattern"),
+        pytest.param("var [{get = 1}] = o;", "var [{get=1}]=o", id="array-element-pattern"),
+        pytest.param("({get = 1} = b);", "({get=1}=b)", id="get-default-assignment"),
+        pytest.param("({set = 2} = o);", "({set=2}=o)", id="set-default-assignment"),
+        pytest.param("x = {get = 1} = o;", "x={get=1}=o", id="chained-assignment-pattern"),
+        pytest.param("for (const {get = 1} of xs) {}", "for(const {get=1} of xs);", id="for-of-pattern"),
+        pytest.param("for (var {async = 1} in o) {}", "for(var {async=1} in o);", id="for-in-pattern"),
+        pytest.param(
+            "function f({get = 1}){return get}", "function f({get=1}){return get}", id="get-default-parameter"
+        ),
+        pytest.param(
+            "function f({set = 1}){return set}", "function f({set=1}){return set}", id="set-default-parameter"
+        ),
+        pytest.param(
+            "function f({async = 1}){return async}", "function f({async=1}){return async}", id="async-default-parameter"
+        ),
+        pytest.param("(function({async = 1}){})", "(function({async=1}){})", id="function-expression-parameter"),
+        pytest.param("var f = ({async = 1}) => async;", "var f=({async=1})=>async", id="arrow-parameter"),
+        pytest.param("var f = ({get = 1} = {}) => get;", "var f=({get=1}={})=>get", id="arrow-parameter-with-default"),
+        pytest.param("var f = async ({get = 1}) => get;", "var f=async({get=1})=>get", id="async-arrow-parameter"),
+        pytest.param("o = {m({set = 1}){}};", "o={m({set=1}){}}", id="method-parameter"),
+        pytest.param("var {of = 1} = o;", "var {of=1}=o", id="of-default"),
+        pytest.param("var {static = 1} = o;", "var {static=1}=o", id="static-default"),
+        pytest.param("var {yield = 1} = o;", "var {yield=1}=o", id="yield-default-in-script"),
+        pytest.param("var {await = 1} = o;", "var {await=1}=o", id="await-default-in-script"),
+        pytest.param("var {let = 1} = o;", "var {let=1}=o", id="let-default-in-sloppy-var"),
+    ],
+)
+def test_contextual_keyword_shorthand_default_minifies_to(source: str, expected: str) -> None:
+    assert minify(source) == expected
+    assert minify(expected) == expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("function* g(){var {yield = 1} = o}", id="yield-in-generator"),
+        pytest.param("async function f(){var {await = 1} = o}", id="await-in-async-function"),
+        pytest.param("var {...{get = 1}} = o;", id="rest-target-not-identifier"),
+    ],
+)
+def test_contextual_keyword_default_in_reserved_context_raises(source: str) -> None:
+    with pytest.raises(ValueError, match="at offset"):
+        minify(source)
 
 
 @pytest.mark.parametrize(

@@ -21,12 +21,9 @@
 #include "data/tag_atom.h"
 #include "tokenizer/statemachine.h"
 
-/* The deepest element nesting the tree builder will construct. Past it a start tag
-   is inserted as a child of the deepest open element but is not itself pushed onto
-   the stack of open elements, so further start tags become its siblings rather than
-   descending further -- the same runaway-nesting bound browsers apply (Blink and
-   WebKit cap the parser's open-element depth at 512). Capping at construction keeps
-   parser bookkeeping bounded, and caps the O(depth^2) cost a linear run of start tags would otherwise pay. */
+/* The deepest element nesting the DOM holds. The open-element stack is never capped, so the insertion modes and the
+   end tags follow the spec at any depth; a node that would nest deeper attaches after its deepest allowed ancestor
+   instead (cap_insertion_point), the way Blink caps its DOM at kMaximumHTMLParserDOMTreeDepth. */
 #define TH_MAX_TREE_DEPTH 512
 
 enum th_node_type {
@@ -481,6 +478,21 @@ void th_node_remove_observed(th_tree *tree, th_node *child);
 void th_node_append_child_observed(th_tree *tree, th_node *parent, th_node *child);
 void th_node_insert_before_observed(th_tree *tree, th_node *parent, th_node *child, th_node *ref);
 
+/* The DOM live-range update rules (dom/range.c), run by the edits above and by normalize while the tree has a live
+   Range. replace_data moves the boundaries of node after its data changes count code points at offset by data_len;
+   removed and inserted update the boundaries of a child that was just unlinked or linked; split moves the boundaries
+   past offset of node to tail, the new node after it; merged moves the boundaries of a text node normalize folds
+   into into, which starts at offset. */
+struct th_live_range;
+int th_tree_has_live_ranges(const th_tree *tree);
+struct th_live_range **th_tree_live_ranges_ptr(th_tree *tree);
+void th_node_insert_before_live(th_tree *tree, th_node *parent, th_node *child, th_node *ref);
+void th_live_replace_data(th_tree *tree, th_node *node, Py_ssize_t offset, Py_ssize_t count, Py_ssize_t data_len);
+void th_live_removed(th_tree *tree, th_node *child);
+void th_live_inserted(th_tree *tree, th_node *child);
+void th_live_split(th_tree *tree, th_node *node, Py_ssize_t offset, th_node *tail);
+void th_live_merged(th_tree *tree, th_node *part, th_node *into, Py_ssize_t offset);
+
 /* The MutationObserver registry (dom/observe.c) lives in the tree's fields, but that
    engine cannot include the tree-internal header (its Node bindings clash with the
    tree-builder's link inlines), so it reaches the registry through these accessors.
@@ -748,6 +760,8 @@ int th_doctype_is_quirky(th_node *node);
    serialize-then-parse rebuilds the tree (measured on 8M fuzzed inputs), so the sanitizer re-checks only its own
    edits; a tree not built by the parser reports 0 and gets the whole-tree pass from its caller. */
 int th_tree_reparse_hazard(const th_tree *tree);
+/* Whether the depth cap moved an inserted node, so the parsed tree is flatter than an uncapped parse of its markup. */
+int th_tree_depth_capped(const th_tree *tree);
 
 /* Whether the tree was parsed with the WHATWG scripting flag on (noscript is a
    raw-text element); programmatic trees default to off. innerHTML fragment parsing
@@ -955,6 +969,8 @@ typedef struct {
     th_xml_unwrap *xml_unwrap;     /* set by the serializer whenever xml is */
     int in_rawtext;                /* set while writing the text of a raw-text element: a script nested there ends
                                       with text, so the element that holds it decides its end tag */
+    int *charset_written;          /* non-NULL when charset is windows-1252: a writer sets *charset_written when it
+                                      declares the label, so the caller refuses C1 controls that label misreads */
 } th_serialize_opts;
 
 /* Serialize node and its subtree under opts. When indent is non-NULL it is the

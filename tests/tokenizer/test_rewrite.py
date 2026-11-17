@@ -404,7 +404,7 @@ def test_rewrite_deeply_nested_beyond_depth_guard_is_safe() -> None:
     assert "x" in result
 
 
-_PAST_LIMIT: Final[int] = _html._REWRITE_MAX_DEPTH  # ruff:ignore[private-member-access]  # the cap the rewriter keeps
+_PAST_LIMIT: Final[int] = 512  # the DOM depth the tree builder caps; the rewriter follows the stack past it
 _RAW_TAGS: Final[tuple[str, ...]] = ("style", "xmp", "textarea", "title", "iframe", "noembed", "noframes")
 
 
@@ -465,9 +465,10 @@ def test_rewrite_removed_raw_text_past_depth_limit_inside_an_integration_point_d
         pytest.param(lambda element: element.after("F"), id="after"),
     ],
 )
-def test_rewrite_element_past_depth_limit_rejects_an_edit_of_its_content(edit: Callable[[Element], None]) -> None:
-    with pytest.raises(ValueError, match="nested past the depth limit"):
-        rewrite(f"{'<p>' * _PAST_LIMIT}<div>x</div>", elements=[("div", edit)])
+def test_rewrite_element_past_depth_limit_edits_its_content_as_below_it(edit: Callable[[Element], None]) -> None:
+    prefix = "<p>" * _PAST_LIMIT
+    body = "<div>x</div>"
+    assert rewrite(prefix + body, elements=[("div", edit)]) == prefix + rewrite(body, elements=[("div", edit)])
 
 
 def test_rewrite_element_past_depth_limit_applies_edits_to_its_tags() -> None:
@@ -476,7 +477,9 @@ def test_rewrite_element_past_depth_limit_applies_edits_to_its_tags() -> None:
     prepended = rewrite(f"{prefix}<div>x</div>", elements=[("div", lambda element: element.prepend("P"))])
     assert prepended == f"{prefix}<div>Px</div>"
     kept = rewrite(f"{prefix}<div>x</div>", elements=[("div", lambda element: element.remove_and_keep_content())])
-    assert kept == f"{prefix}x</div>"
+    assert kept == prefix + rewrite(
+        "<div>x</div>", elements=[("div", lambda element: element.remove_and_keep_content())]
+    )
 
 
 def test_rewrite_svg_past_depth_limit_is_unchanged_without_handlers() -> None:
@@ -493,9 +496,9 @@ def test_rewrite_svg_past_depth_limit_is_unchanged_without_handlers() -> None:
         pytest.param(lambda source: rewrite(source, doctype=lambda _: None), id="doctype"),
     ],
 )
-def test_rewrite_svg_past_depth_limit_raises_for_a_handler(run: Callable[[str], str]) -> None:
-    with pytest.raises(ValueError, match="SVG or MathML nested past the depth limit"):
-        run(f"{'<p>' * _PAST_LIMIT}<svg><script>x</script></svg>")
+def test_rewrite_svg_past_depth_limit_runs_a_handler(run: Callable[[str], str]) -> None:
+    html = f"{'<p>' * _PAST_LIMIT}<svg><script>x</script></svg>"
+    assert run(html) == html
 
 
 def test_rewrite_raw_content_past_depth_limit_that_ends_it_raises() -> None:
@@ -584,6 +587,76 @@ def test_rewrite_text_node_insertions_in_raw_text_are_literal() -> None:
 
 def test_rewrite_text_node_replace_in_raw_text_is_literal() -> None:
     assert rewrite("<style>x</style>", text=lambda text: text.replace("a>b")) == "<style>a>b</style>"
+
+
+@pytest.mark.parametrize(
+    ("html", "edit", "expected"),
+    [
+        pytest.param(
+            "<script>x</script>", lambda e: e.set_content("a\rb"), "<script>a\nb</script>", id="raw-set-content"
+        ),
+        pytest.param("<xmp>x</xmp>", lambda e: e.set_content("a\r\nb"), "<xmp>a\nb</xmp>", id="raw-crlf"),
+        pytest.param("<xmp>x</xmp>", lambda e: e.set_content("a\r"), "<xmp>a\n</xmp>", id="raw-trailing-cr"),
+        pytest.param("<script>x</script>", lambda e: e.append("a\rb"), "<script>xa\nb</script>", id="raw-append"),
+        pytest.param("<p>x</p>", lambda e: e.set_content("a\rb"), "<p>a&#13;b</p>", id="text-set-content"),
+        pytest.param("<p>x</p>", lambda e: e.append("a\rb"), "<p>xa&#13;b</p>", id="text-append"),
+        pytest.param(
+            "<textarea>x</textarea>", lambda e: e.set_content("a\rb"), "<textarea>a&#13;b</textarea>", id="rcdata"
+        ),
+        pytest.param("<p>x</p>", lambda e: e.append("a\rb", html=True), "<p>xa\nb</p>", id="html-markup"),
+        pytest.param("<p>x</p>", lambda e: e.replace("a\rb"), "a&#13;b", id="replaced-element-text"),
+        pytest.param("<p>x</p>", lambda e: e.replace("a\rb", html=True), "a\nb", id="replaced-element-html"),
+        pytest.param("<p>x</p>", lambda e: e.set_attribute("k", "a\rb"), '<p k="a&#13;b">x</p>', id="attribute"),
+        pytest.param(
+            "<svg><g>x</g></svg>",
+            lambda e: e.set_attribute("k", "a\rb") if e.tag == "g" else None,
+            '<svg><g k="a&#13;b">x</g></svg>',
+            id="foreign-attribute",
+        ),
+        pytest.param(
+            '<p title="a&#13;b">x</p>',
+            lambda e: e.set_attribute("k", "v"),
+            '<p title="a&#13;b" k="v">x</p>',
+            id="attribute-decoded-reference",
+        ),
+    ],
+)
+def test_rewrite_carriage_return_in_written_content(html: str, edit: Callable[[Element], None], expected: str) -> None:
+    assert rewrite(html, elements=[("*", edit)]) == expected
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param("<!--x-->", "<!--a\nb-->", id="comment"),
+        pytest.param("<svg><!--x--></svg>", "<svg><!--a\nb--></svg>", id="foreign-comment"),
+    ],
+)
+def test_rewrite_carriage_return_in_comment_is_line_feed(html: str, expected: str) -> None:
+    assert rewrite(html, comments=lambda comment: comment.set_text("a\rb")) == expected
+
+
+def test_rewrite_carriage_return_in_cdata_text_is_escaped() -> None:
+    assert rewrite("<svg><![CDATA[x]]></svg>", text=lambda text: text.set_text("a\rb")) == "<svg>a&#13;b</svg>"
+
+
+def test_rewrite_carriage_return_in_cdata_source_is_line_feed() -> None:
+    assert rewrite("<svg><![CDATA[a\rb]]></svg>") == "<svg><![CDATA[a\nb]]></svg>"
+
+
+def test_rewrite_carriage_return_in_raw_text_handler_is_line_feed() -> None:
+    assert rewrite("<script>x</script>", text=lambda text: text.set_text("a\rb")) == "<script>a\nb</script>"
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        pytest.param("<textarea>&#13;x</textarea>", "&#13;x", id="decoded-reference"),
+        pytest.param("<textarea>a\rb</textarea>", "a\nb", id="source-cr"),
+    ],
+)
+def test_rewrite_unwrapped_rcdata_carriage_return_keeps_its_meaning(html: str, expected: str) -> None:
+    assert rewrite(html, elements=[("textarea", _unwrap)]) == expected
 
 
 @pytest.mark.parametrize(
@@ -743,7 +816,82 @@ def test_rewrite_unwrapped_raw_text_prepend_is_not_checked() -> None:
         text.after("<!--x-->", html=True)
 
     # prepend marked the script as written into, but no <script> is left for the comment to hide an end tag in
-    assert rewrite("<script>x</script>", elements=[("script", handler)], text=note) == "x<!--x-->"
+    assert rewrite("<script>x</script>", elements=[("script", handler)], text=note) == "ax<!--x-->"
+
+
+@pytest.mark.parametrize(
+    ("html", "edits", "expected"),
+    [
+        pytest.param("<div>x</div>", (methodcaller("prepend", "P"),), "Px", id="prepend"),
+        pytest.param("<div>x</div>", (methodcaller("prepend", "P"), methodcaller("append", "A")), "PxA", id="both"),
+        pytest.param("<div>x</div>", (methodcaller("prepend", "<i>", html=True),), "<i>x", id="prepend-html"),
+        pytest.param("<div>x</div>", (methodcaller("prepend", "P"), methodcaller("set_content", "S")), "PS", id="set"),
+        pytest.param(
+            "<div>x</div>", (methodcaller("before", "B"), methodcaller("after", "C")), "BxC", id="before-after"
+        ),
+        pytest.param(
+            "<div>x</div>",
+            (methodcaller("prepend", "P"), methodcaller("before", "B"), methodcaller("after", "C")),
+            "BPxC",
+            id="prepend-before-after",
+        ),
+        pytest.param("<xmp>x</xmp>", (methodcaller("prepend", "P"), methodcaller("append", "A")), "PxA", id="xmp"),
+        pytest.param("<script>x</script>", (methodcaller("prepend", "P"),), "Px", id="script"),
+        pytest.param("<script>x</script>", (methodcaller("prepend", "a<b"),), "a&lt;bx", id="script-escaped"),
+        pytest.param("<script>x</script>", (methodcaller("prepend", "<i>", html=True),), "<i>x", id="script-html"),
+        pytest.param("<script>x</script>", (methodcaller("prepend", "</script>"),), "&lt;/script&gt;x", id="end-tag"),
+        pytest.param(
+            "<script>x</script>",
+            (methodcaller("prepend", "P"), methodcaller("before", "B"), methodcaller("after", "C")),
+            "BPxC",
+            id="script-before-after",
+        ),
+        pytest.param("<title>a</title>", (methodcaller("prepend", "<b>"),), "&lt;b&gt;a", id="title"),
+        pytest.param("<textarea>a</textarea>", (methodcaller("prepend", "&amp;"),), "&amp;amp;a", id="textarea"),
+    ],
+)
+def test_rewrite_unwrapped_element_keeps_inserted_content(
+    html: str, edits: tuple[Callable[..., object], ...], expected: str
+) -> None:
+    assert rewrite(html, elements=[("*", _edits(edits)), ("*", _unwrap)]) == expected
+    assert rewrite(html, elements=[("*", _unwrap), ("*", _edits(edits))]) == expected
+
+
+def _edits(edits: tuple[Callable[..., object], ...]) -> Callable[[Element], None]:
+    def handler(element: Element) -> None:
+        for edit in edits:
+            edit(element)
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    ("html", "edits", "expected"),
+    [
+        pytest.param("<div>x</div>", (methodcaller("prepend", "P"), methodcaller("remove")), "", id="remove"),
+        pytest.param("<div>x</div>", (methodcaller("prepend", "P"), methodcaller("replace", "R")), "R", id="replace"),
+        pytest.param("<script>x</script>", (methodcaller("prepend", "P"), methodcaller("remove")), "", id="raw-remove"),
+        pytest.param(
+            "<script>x</script>", (methodcaller("prepend", "P"), methodcaller("replace", "R")), "R", id="raw-replace"
+        ),
+        pytest.param(
+            "<div>x</div>",
+            (
+                methodcaller("prepend", "P"),
+                methodcaller("before", "B"),
+                methodcaller("after", "C"),
+                methodcaller("remove"),
+            ),
+            "BC",
+            id="remove-keeps-before-after",
+        ),
+    ],
+)
+def test_rewrite_removed_element_drops_inserted_content(
+    html: str, edits: tuple[Callable[..., object], ...], expected: str
+) -> None:
+    assert rewrite(html, elements=[("*", _edits(edits)), ("*", _unwrap)]) == expected
+    assert rewrite(html, elements=[("*", _unwrap), ("*", _edits(edits))]) == expected
 
 
 @pytest.mark.parametrize(

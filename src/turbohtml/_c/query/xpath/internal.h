@@ -197,12 +197,6 @@ int xp_too_deep(int depth);
 #define XP_HELD_DEPTH 1
 #define XP_PREDICATE_DEPTH 1
 
-/* Before CPython 3.12, and on PyPy and free-threaded builds, = and != compare through Python, so a predicate using
-   them takes the per-context evaluation rather than the offset formulas. */
-#if PY_VERSION_HEX < 0x030C0000 || defined(PYPY_VERSION) || defined(Py_GIL_DISABLED)
-#define XP_EQ_VIA_PYTHON 1
-#endif
-
 /* The evaluation context: the tree, the current node, its 1-based proximity
    position and the context size, plus where to report an unimplemented feature. */
 typedef struct {
@@ -342,6 +336,7 @@ const th_node_attr *xp_lang_memoized(xp_ctx *ctx, struct th_node *from, uint32_t
 Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len);
 Py_UCS4 *ucs4_dup(const Py_UCS4 *src, Py_ssize_t len);
 Py_UCS4 *ucs4_from_ascii(const char *src, Py_ssize_t length, Py_ssize_t *len);
+Py_UCS4 *ucs4_from_utf8(const char *src, Py_ssize_t length, Py_ssize_t *len);
 double parse_number(const Py_UCS4 *text, Py_ssize_t len);
 /* The correctly rounded value of a decimal run of ASCII digits with at most one '.' and
    at least one digit (XPath's Number production, which the lexer and parse_number
@@ -374,5 +369,8 @@ int xp_pattern_is_static(const xp_program *prog);
 int xp_pattern_reads_call(const xp_program *prog);
 int xp_step_reads_position(const xp_program *prog, int32_t step_index);
 int xp_single_attribute_atom(const xp_program *prog, struct th_tree *tree, uint32_t *atom);
+/* The number of nodes count() of the path at path_idx selects from the context, answered from the walk memo, or 0 with
+   nothing counted when the memo does not apply. */
+int xp_count_walk(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, Py_ssize_t *count);
 
 #endif /* TURBOHTML_XPATH_INTERNAL_H */

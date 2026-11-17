@@ -1403,7 +1403,7 @@ static PyObject *anchor_attrs(th_tree *tree, th_node *anchor) {
         if (name_len == 4 && memcmp(name, "href", 4) == 0) {
             continue;
         }
-        PyObject *key = PyUnicode_FromStringAndSize(name, name_len);
+        PyObject *key = PyUnicode_DecodeUTF8(name, name_len, "surrogatepass");
         PyObject *value = attr_text(&anchor->attrs[index]);
         if (key == NULL || value == NULL || /* GCOVR_EXCL_BR_LINE: attribute string allocation cannot be forced */
             PyDict_SetItem(attrs, key, value) < 0) { /* GCOVR_EXCL_BR_LINE: attribute dict insertion allocation */
@@ -1526,14 +1526,16 @@ static int set_candidate_attrs(th_tree *tree, th_node *anchor, PyObject *url, Py
         }
     }
     while (PyDict_Next(attrs, &pos, &name, &value)) {
-        Py_ssize_t name_len;
-        const char *name_bytes = PyUnicode_AsUTF8AndSize(name, &name_len);
+        PyObject *name_bytes = PyUnicode_AsEncodedString(name, "utf-8", "surrogatepass");
         Py_UCS4 *value_points = PyUnicode_AsUCS4Copy(value);
         if (name_bytes == NULL || value_points == NULL) { /* GCOVR_EXCL_BR_LINE: UTF-8/UCS4 allocation */
+            Py_XDECREF(name_bytes);                       /* GCOVR_EXCL_LINE */
             PyMem_Free(value_points);                     /* GCOVR_EXCL_LINE */
             return -1;                                    /* GCOVR_EXCL_LINE */
         }
-        status = th_node_attr_set(tree, anchor, name_bytes, name_len, value_points, PyUnicode_GET_LENGTH(value), 1);
+        status = th_node_attr_set(tree, anchor, PyBytes_AS_STRING(name_bytes), PyBytes_GET_SIZE(name_bytes),
+                                  value_points, PyUnicode_GET_LENGTH(value), 1);
+        Py_DECREF(name_bytes);
         PyMem_Free(value_points);
         if (status < 0) { /* GCOVR_EXCL_BR_LINE: attribute arena allocation cannot be forced from a test */
             return -1;    /* GCOVR_EXCL_LINE */
@@ -1571,7 +1573,7 @@ static void unwrap_anchor(th_tree *tree, th_node *anchor) {
     while (anchor->first_child != NULL) {
         th_node *child = anchor->first_child;
         th_node_remove_silent(tree, child);
-        th_node_insert_before(parent, child, anchor);
+        th_node_insert_before_live(tree, parent, child, anchor);
     }
     th_node_remove_silent(tree, anchor);
 }
@@ -1791,7 +1793,7 @@ TH_NODE_API(static, int, apply_text,
             while (fragment->first_child != NULL) {
                 th_node *child = fragment->first_child;
                 th_node_remove(child);
-                th_node_insert_before(parent, child, node);
+                th_node_insert_before_live(tree, parent, child, node);
             }
             th_node_remove_silent(tree, node);
             handle_drop_slots((HandleObject *)handle);

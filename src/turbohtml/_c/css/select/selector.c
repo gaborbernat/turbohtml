@@ -426,23 +426,29 @@ static int sel_kw(const Py_UCS4 *name, Py_ssize_t len, const char *kw) {
     return 1;
 }
 
-/* Read a run of ASCII digits as a non-negative int, saturating at INT_MAX rather
-   than overflowing; *seen reports any digit. */
-static int sel_read_int(sel_parser *parser, int *seen) {
-    int value = 0;
+/* Read a run of ASCII digits as a magnitude; *seen reports any digit. A magnitude past INT_MAX stops growing, which
+   keeps the value past INT_MAX and so still clamps the same way. */
+static int64_t sel_read_int(sel_parser *parser, int *seen) {
+    int64_t value = 0;
     *seen = 0;
     while (parser->pos < parser->len && parser->src[parser->pos] >= '0' && parser->src[parser->pos] <= '9') {
         const int digit = (int)(parser->src[parser->pos] - '0');
-        value = value > (INT_MAX - digit) / 10 ? INT_MAX : value * 10 + digit;
+        value = value > INT_MAX ? value : value * 10 + digit;
         parser->pos++;
         *seen = 1;
     }
     return value;
 }
 
-/* Parse the An+B microsyntax (CSS Syntax §"The An+B microsyntax") into a/b,
-   including the even/odd keywords. pos starts after '(' and stops at the ')'. */
-static void sel_parse_anb(sel_parser *parser, int *a, int *b) {
+/* A coefficient as browsers read it: its signed value saturated to the 32-bit int range, so -2^31 stays INT_MIN. */
+static int64_t sel_clamp_int(int negative, int64_t magnitude) {
+    const int64_t value = negative ? -magnitude : magnitude;
+    return value < INT_MIN ? INT_MIN : (value > INT_MAX ? INT_MAX : value);
+}
+
+/* Parse the An+B microsyntax (CSS Syntax §"The An+B microsyntax") into a/b, including the even/odd keywords. pos
+   starts after '(' and stops at the ')'. */
+static void sel_parse_anb(sel_parser *parser, int64_t *a, int64_t *b) {
     sel_skip_ws(parser);
     if (parser->pos + 4 <= parser->len && sel_kw(parser->src + parser->pos, 4, "even")) {
         parser->pos += 4;
@@ -464,39 +470,55 @@ static void sel_parse_anb(sel_parser *parser, int *a, int *b) {
         parser->pos++;
     }
     int seen_a;
-    int num = sel_read_int(parser, &seen_a);
+    const int64_t num = sel_read_int(parser, &seen_a);
     if (parser->pos < parser->len && (parser->src[parser->pos] | 32) == 'n') {
         parser->pos++;
-        *a = sign * (seen_a ? num : 1);
+        *a = seen_a ? sel_clamp_int(sign < 0, num) : sign;
         sel_skip_ws(parser);
         if (parser->pos < parser->len && (parser->src[parser->pos] == '+' || parser->src[parser->pos] == '-')) {
-            int bsign = parser->src[parser->pos] == '-' ? -1 : 1;
+            const int bsign = parser->src[parser->pos] == '-' ? -1 : 1;
             parser->pos++;
             sel_skip_ws(parser);
             int seen_b;
-            int bval = sel_read_int(parser, &seen_b);
+            const int64_t bval = sel_read_int(parser, &seen_b);
             if (!seen_b) {
                 sel_fail(parser, "expected a number after the sign in An+B");
                 return;
             }
-            *b = bsign * bval;
-            if (*b < 0 && *a != 0) {
-                /* a descending series that starts below 1 matches no position, and an ascending one matches the same
-                   positions from b % a, so the reduction changes no match and no translated XPath; a step of -1 then
-                   never keeps a negative offset, which keeps sel_nth_matches away from INT_MIN % -1 */
-                *b = *a < 0 ? 0 : *b % *a;
-            }
+            *b = sel_clamp_int(bsign < 0, bval);
         } else {
             *b = 0;
         }
     } else if (seen_a) {
         *a = 0;
-        *b = sign * num;
+        *b = sel_clamp_int(sign < 0, num);
     } else {
         sel_fail(parser, "expected An+B"); /* a bare sign with no digits and no 'n' is invalid */
         return;
     }
     sel_skip_ws(parser);
+}
+
+/* The pair the matcher reads for the An+B = a/b, with both coefficients inside the 32-bit int range. It selects the
+   sibling positions in [1, INT_MAX] that the exact integers select. A positive a keeps b when b >= 1 and otherwise
+   its residue in [0, a), which the positions congruent to b and not below it reduce to. A negative a whose magnitude
+   exceeds INT_MAX keeps at most the position b, since the step can be reached only once. */
+static void sel_nth_narrow(int64_t a, int64_t b, int *out_a, int *out_b) {
+    int64_t pa = 0;
+    int64_t pb = 0;
+    if (a == 0) {
+        pb = b >= 1 ? b : 0;
+    } else if (a > 0) {
+        pa = a;
+        pb = b >= 1 ? b : ((b % a) + a) % a;
+    } else if (b < 1) {
+        pa = -a <= INT_MAX ? a : 0;
+    } else {
+        pa = -a <= INT_MAX ? a : 0;
+        pb = b;
+    }
+    *out_a = (int)pa;
+    *out_b = (int)pb;
 }
 
 /* Parse the comma-separated selector list inside a :is()/:where()/:has(); defined
@@ -662,10 +684,13 @@ static void sel_pseudo(sel_parser *parser, sel_simple *simple) {
             return;
         }
         parser->pos++;
-        sel_parse_anb(parser, &simple->nth_a, &simple->nth_b);
+        int64_t nth_a = 0;
+        int64_t nth_b = 0;
+        sel_parse_anb(parser, &nth_a, &nth_b);
         if (parser->error) {
             return;
         }
+        sel_nth_narrow(nth_a, nth_b, &simple->nth_a, &simple->nth_b);
         /* the Level-4 'of S' clause filters the sibling list by a selector; it is
            valid only on :nth-child()/:nth-last-child(), not the -of-type variants */
         if (parser->pos < parser->len && sel_is_ident(parser->src[parser->pos])) {
@@ -2220,16 +2245,13 @@ walk:;
     return index;
 }
 
-/* Whether a 1-based index satisfies An+B for some non-negative n. sel_parse_anb leaves a
-   negative b only with a = 0 or above -a, so the difference cannot reach INT_MIN with
-   a = -1 (a hardware divide error on x86). Past INT_MAX the unsigned subtraction wraps
-   to a negative difference that reads as no match, which is wrong only for a position
-   beyond INT_MAX / 2, a position that needs over a billion siblings. */
+/* Whether a 1-based index satisfies An+B for some non-negative n. sel_nth_narrow leaves b non-negative whenever a is
+   not 0, and both operands within INT_MAX, so index - b cannot overflow. */
 static int sel_nth_matches(int a, int b, int index) {
     if (a == 0) {
         return index == b;
     }
-    const int diff = (int)((unsigned)index - (unsigned)b);
+    const int diff = index - b;
     return diff % a == 0 && diff / a >= 0;
 }
 
@@ -3495,7 +3517,42 @@ static int sel_has_desc(th_node *node, const sel_complex *rel, const sel_compoun
     }
 }
 
-static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, th_node *anchor, const sel_ctx *ctx) {
+/* Whether rel reaches its subject through child and sibling combinators alone, from compound `first` on (a :scope that
+   pins compounds[0] to the anchor leaves the lead to compounds[1]). Only a descendant combinator can put the subject
+   deeper than rel->count levels below the anchor, so the walk for any other argument stops there. */
+static int sel_rel_levels_bounded(const sel_complex *rel, int first) {
+    for (int index = first; index < rel->count; index++) {
+        if (rel->compounds[index].combinator == ' ') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* sel_has_subtree for a rel bounded by sel_rel_levels_bounded: the walk visits the elements `levels` levels below node
+   and no deeper, so each child recurses only while a level remains. */
+static int sel_has_levels(th_node *node, const sel_complex *rel, int subject, th_node *anchor, const sel_ctx *ctx,
+                          int levels) {
+    for (th_node *current = sel_first_element_child(node); current != NULL;
+         current = sel_next_element_sibling(current)) {
+        TH_WORK_STEP();
+        if (sel_match_compound(current, &rel->compounds[subject], ctx) &&
+            sel_match_from(current, rel, subject, anchor, ctx) == SEL_MATCHES) {
+            return 1;
+        }
+        if (levels > 1 && sel_has_levels(current, rel, subject, anchor, ctx, levels - 1)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* levels is 0 for a rel with a descendant combinator, which can reach any depth. */
+static int sel_has_subtree(th_node *node, const sel_complex *rel, int subject, th_node *anchor, const sel_ctx *ctx,
+                           int levels) {
+    if (levels != 0) {
+        return sel_has_levels(node, rel, subject, anchor, ctx, levels);
+    }
     th_node *current = sel_first_element_child(node);
     while (current != NULL) {
         TH_WORK_STEP();
@@ -3638,12 +3695,11 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, co
            selector scans the subtree, a sibling one the following siblings. An explicit
            leading :scope pins compound[0] to the anchor, so the reach is set by the
            combinator after it (:has(:scope + x) equals :has(+ x)) (issue #431) */
-        char lead = rel->compounds[0].combinator;
-        if (rel->count > 1 && sel_compound_has_scope(&rel->compounds[0])) {
-            lead = rel->compounds[1].combinator;
-        }
+        const int pinned = rel->count > 1 && sel_compound_has_scope(&rel->compounds[0]);
+        const char lead = rel->compounds[pinned].combinator;
+        const int levels = rel->count > 1 && sel_rel_levels_bounded(rel, pinned) ? rel->count : 0;
         if (lead != '+' && lead != '~') {
-            if (sel_has_subtree(anchor, rel, subject, anchor, &scoped)) {
+            if (sel_has_subtree(anchor, rel, subject, anchor, &scoped, levels)) {
                 return 1;
             }
             continue;
@@ -3663,7 +3719,7 @@ static int sel_has_match(th_node *anchor, const sel_complex *alts, int count, co
             }
             if ((sel_match_compound(sibling, &rel->compounds[subject], &scoped) &&
                  sel_match_from(sibling, rel, subject, anchor, &scoped) == SEL_MATCHES) ||
-                sel_has_subtree(sibling, rel, subject, anchor, &scoped)) {
+                sel_has_subtree(sibling, rel, subject, anchor, &scoped, levels)) {
                 return 1;
             }
         }

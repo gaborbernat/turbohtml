@@ -967,6 +967,31 @@ def test_attribute_escaping(value: str, expected: str) -> None:
     assert Element("p", {"title": value}).serialize(_XML) == f'<p title="{expected}"/>'
 
 
+@pytest.mark.parametrize("tag", ["script", "style", "xmp", "iframe", "noembed", "noframes"])
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param("a\rb", "a\nb", id="cr"),
+        pytest.param("a\r\nb", "a\nb", id="crlf"),
+        pytest.param("a\r\r\nb", "a\n\nb", id="cr-then-crlf"),
+        pytest.param("a\r", "a\n", id="trailing-cr"),
+        pytest.param("ab\r", "ab\n", id="odd-trailing-cr"),
+        pytest.param("abc\rd", "abc\nd", id="cr-in-later-pair"),
+        pytest.param("ab\nc", "ab\nc", id="lf-even-length"),
+        pytest.param("a\nb", "a\nb", id="lf-stays"),
+    ],
+)
+def test_raw_text_carriage_return_is_written_as_line_feed(tag: str, text: str, expected: str) -> None:
+    out = Element(tag, children=[Text(text)]).serialize()
+    assert out == f"<{tag}>{expected}</{tag}>"
+    assert _fragment(out, tag).serialize() == out
+
+
+@pytest.mark.parametrize("tag", ["script", "style", "xmp", "iframe", "noembed", "noframes"])
+def test_parsed_raw_text_carriage_return_is_line_feed(tag: str) -> None:
+    assert _fragment(f"<{tag}>a\rb\r\nc</{tag}>", tag).serialize() == f"<{tag}>a\nb\nc</{tag}>"
+
+
 def test_script_content_is_escaped_not_raw() -> None:
     node = _fragment("<script>if(a<b){}</script>", "script")
     assert node.serialize(_XML) == "<script>if(a&lt;b){}</script>"
@@ -2137,6 +2162,130 @@ def test_encode_meta_charset_uses_target_encoding() -> None:
     assert out == ('<html><head><meta charset="windows-1252"></head><body><p>x</p></body></html>'.encode("latin-1"))
 
 
+@pytest.mark.parametrize("encoding", [pytest.param("latin-1", id="latin-1"), pytest.param("iso-8859-1", id="alias")])
+@pytest.mark.parametrize(
+    "markup",
+    [
+        pytest.param("<p>\x80</p>", id="text-first-c1"),
+        pytest.param("<p>\x85</p>", id="text-ellipsis-slot"),
+        pytest.param("<p>\x9f</p>", id="text-last-c1"),
+        pytest.param('<p title="\x85">x</p>', id="attribute-value"),
+        pytest.param("<!--\x85--><p>x</p>", id="comment"),
+    ],
+)
+def test_encode_meta_charset_refuses_c1_controls_under_windows_1252(markup: str, encoding: str) -> None:
+    with pytest.raises(ValueError, match="windows-1252"):
+        parse(markup).encode(encoding, Html(meta_charset=True))
+
+
+@pytest.mark.parametrize(
+    "character",
+    [
+        pytest.param("\x81", id="unassigned-81"),
+        pytest.param("\x8d", id="unassigned-8d"),
+        pytest.param("\x8f", id="unassigned-8f"),
+        pytest.param("\x90", id="unassigned-90"),
+        pytest.param("\x9d", id="unassigned-9d"),
+    ],
+)
+def test_encode_meta_charset_keeps_c1_windows_1252_reads_back(character: str) -> None:
+    # windows-1252 maps these five bytes to the same C1 code points, so the declared label reads them back as written
+    out: Final = parse(f"<p>{character}</p>").encode("latin-1", Html(meta_charset=True))
+    assert out == f'<html><head><meta charset="windows-1252"></head><body><p>{character}</p></body></html>'.encode(
+        "latin-1"
+    )
+
+
+@pytest.mark.parametrize("encoding", [pytest.param("iso-8859-9", id="latin5"), pytest.param("latin5", id="alias")])
+def test_encode_meta_charset_refuses_c1_under_windows_1254(encoding: str) -> None:
+    # the WHATWG label of ISO-8859-9 is windows-1254, which reads 0x85 as an ellipsis
+    with pytest.raises(ValueError, match="windows-1254"):
+        parse("<p>\x85</p>").encode(encoding, Html(meta_charset=True))
+
+
+@pytest.mark.parametrize(
+    ("encoding", "character", "label"),
+    [
+        pytest.param("koi8-u", "\u255d", "KOI8-U", id="koi8-u-box-drawing"),
+        pytest.param("tis-620", "\x80", "windows-874", id="tis-620-windows-874"),
+        pytest.param("big5", "\u0430", "Big5", id="big5-cyrillic"),
+        pytest.param("cp932", "\uf8f1", "Shift_JIS", id="cp932-user-defined"),
+    ],
+)
+def test_encode_meta_charset_refuses_text_the_declared_label_misreads(
+    encoding: str, character: str, label: str
+) -> None:
+    # Python's codec writes bytes that the WHATWG decoder of the declared label reads as other characters
+    with pytest.raises(ValueError, match=re.escape(f"meta_charset cannot declare {label}")):
+        parse(f"<p>{character}</p>").encode(encoding, Html(meta_charset=True))
+
+
+def test_encode_meta_charset_iso2022_shift_code_raises_the_codec_error() -> None:
+    # the declared ISO-2022-JP label is valid, but its codec refuses the shift code the text holds
+    with pytest.raises(UnicodeEncodeError, match="iso2022_jp"):
+        parse("<p>\x1b</p>").encode("iso2022_jp", Html(meta_charset=True))
+
+
+@pytest.mark.parametrize("encoding", [pytest.param("latin-1", id="first"), pytest.param("latin-1", id="repeat")])
+def test_encode_meta_charset_refuses_c1_on_every_call(encoding: str) -> None:
+    # the per-codec byte range is cached, so the second and later calls must still refuse the misread bytes
+    for _ in range(2):
+        with pytest.raises(ValueError, match="windows-1252"):
+            parse("<p>\x85</p>").encode(encoding, Html(meta_charset=True))
+    assert (
+        parse("<p>a\xe9</p>")
+        .encode(encoding, Html(meta_charset=True))
+        .decode("latin-1")
+        .endswith("<p>a\xe9</p></body></html>")
+    )
+
+
+@pytest.mark.parametrize(
+    "offset", [pytest.param(0, id="first"), pytest.param(37, id="vector-block"), pytest.param(390, id="scalar-tail")]
+)
+def test_encode_meta_charset_finds_c1_at_any_offset_of_long_output(offset: int) -> None:
+    # the byte scan works in 64-byte blocks and then a scalar tail, so a long output is checked at every position
+    filler: Final = "a" * 400
+    markup: Final = f"<p>{filler[:offset]}\x85{filler[offset:]}</p>"
+    with pytest.raises(ValueError, match="windows-1252"):
+        parse(markup).encode("latin-1", Html(meta_charset=True))
+
+
+def test_encode_meta_charset_long_latin1_output_without_c1_is_kept() -> None:
+    body: Final = "".join(f"<p>caf\u00e9 {index} \u00fc</p>" for index in range(200))
+    out: Final = parse(body).encode("latin-1", Html(meta_charset=True)).decode("latin-1")
+    assert out.startswith('<html><head><meta charset="windows-1252"></head>')
+    assert "<p>caf\u00e9 199 \u00fc</p></body></html>" in out
+
+
+def test_encode_meta_charset_utf8_keeps_c1_controls() -> None:
+    out: Final = parse("<p>\x85</p>").encode("utf-8", Html(meta_charset=True))
+    assert out.decode("utf-8").endswith("<p>\x85</p></body></html>")
+
+
+@pytest.mark.parametrize(
+    ("markup", "body"),
+    [
+        pytest.param("<p>\x7f</p>", "<p>\x7f</p>", id="delete"),
+        pytest.param("<p>\xff</p>", "<p>\xff</p>", id="latin-small-y-diaeresis"),
+        pytest.param("<p>\xa0</p>", "<p>&nbsp;</p>", id="no-break-space"),
+    ],
+)
+def test_encode_meta_charset_keeps_latin1_outside_c1(markup: str, body: str) -> None:
+    out: Final = parse(markup).encode("latin-1", Html(meta_charset=True))
+    assert out == f'<html><head><meta charset="windows-1252"></head><body>{body}</body></html>'.encode("latin-1")
+
+
+def test_encode_without_meta_charset_writes_c1_bytes_unchanged() -> None:
+    assert parse("<p>\x85</p>").encode("latin-1") == b"<html><head></head><body><p>\x85</p></body></html>"
+
+
+def test_encode_meta_charset_inner_writes_no_declaration_so_c1_is_kept() -> None:
+    element: Final = parse("<p>\x85</p>").find("p")
+    assert element is not None
+    assert element.encode("latin-1", Html(meta_charset=True), inner=True) == b"\x85"
+
+
 @pytest.mark.parametrize(
     ("codec", "text", "label"),
     [
@@ -2213,7 +2362,18 @@ def test_encode_meta_charset_rejects_an_unknown_codec() -> None:
         parse("<p>x").encode("turbohtml-no-such-codec", Html(meta_charset=True))
 
 
-@pytest.mark.parametrize("label", ["iso-2022-jp", "ISO-2022-JP", "csiso2022jp", "iso2022_jp", "iso-2022-kr"])
+_ISO_2022_CODECS: Final[list[str]] = [
+    "iso2022_jp",
+    "iso2022_jp_1",
+    "iso2022_jp_2",
+    "iso2022_jp_2004",
+    "iso2022_jp_3",
+    "iso2022_jp_ext",
+    "iso2022_kr",
+]
+
+
+@pytest.mark.parametrize("label", ["iso-2022-jp", "ISO-2022-JP", "csiso2022jp", "iso-2022-kr", *_ISO_2022_CODECS])
 @pytest.mark.parametrize(
     "shift",
     [pytest.param("\x0e", id="shift-out"), pytest.param("\x0f", id="shift-in"), pytest.param("\x1b", id="escape")],
@@ -2224,6 +2384,63 @@ def test_encode_iso_2022_refuses_a_shift_code(label: str, shift: str) -> None:
     with pytest.raises(UnicodeEncodeError, match="shift code") as refused:
         doc.encode(label)
     assert refused.value.start == doc.serialize().index(shift)
+
+
+@pytest.mark.parametrize("codec", _ISO_2022_CODECS)
+def test_encode_refuses_a_shift_code_in_an_iso_2022_codec_under_another_name(codec: str) -> None:
+    info: Final = codecs.lookup(codec)
+    renamed: Final = codecs.CodecInfo(info.encode, info.decode, name="turbohtml_renamed_iso")
+    search: Final = {"turbohtml_renamed_iso": renamed}.get
+    codecs.register(search)
+    try:
+        with pytest.raises(UnicodeEncodeError, match="shift code") as refused:
+            parse("<p>\x0e</p>").select("p")[0].encode("turbohtml_renamed_iso")
+        assert refused.value.start == 3
+    finally:
+        codecs.unregister(search)
+
+
+@pytest.mark.parametrize("shift", [pytest.param(b"\x0e", id="shift-out"), pytest.param(b"\x0f", id="shift-in")])
+def test_encode_refuses_a_shift_code_under_a_codec_that_switches_on_one_byte(shift: bytes) -> None:
+    # no escape sequence precedes the lone shift byte, so the probe has to find it on its own
+    def encode(text: str, errors: str = "strict") -> tuple[bytes, int]:
+        return shift + text.encode("ascii", errors), len(text)
+
+    info: Final = codecs.CodecInfo(encode, codecs.lookup("ascii").decode, name="turbohtml_one_byte_switch")
+    search: Final = {"turbohtml_one_byte_switch": info}.get
+    codecs.register(search)
+    try:
+        with pytest.raises(UnicodeEncodeError, match="shift code"):
+            parse("<p>\x0e</p>").select("p")[0].encode("turbohtml_one_byte_switch")
+    finally:
+        codecs.unregister(search)
+
+
+def test_encode_keeps_markup_under_a_codec_that_refuses_the_probe_text() -> None:
+    def encode(text: str, errors: str = "strict") -> tuple[bytes, int]:
+        if any(ord(character) > 0x7F for character in text):
+            msg = "refused"
+            raise ValueError(msg)
+        return text.encode("ascii", errors), len(text)
+
+    info: Final = codecs.CodecInfo(encode, codecs.lookup("ascii").decode, name="turbohtml_refuses_probe")
+    search: Final = {"turbohtml_refuses_probe": info}.get
+    codecs.register(search)
+    try:
+        assert parse("<p>x</p>").select("p")[0].encode("turbohtml_refuses_probe") == b"<p>x</p>"
+    finally:
+        codecs.unregister(search)
+
+
+@pytest.mark.parametrize("codec", ["hz", "utf-7"])
+def test_encode_writes_shift_codes_that_a_stateful_codec_reads_back(codec: str) -> None:
+    doc: Final = parse("<p>\x0e\x0f\x1b~{+</p>")
+    assert doc.encode(codec).decode(codec) == doc.serialize()
+
+
+def test_encode_rejects_an_unknown_codec_for_markup_with_a_shift_code() -> None:
+    with pytest.raises(LookupError):
+        parse("<p>\x0e</p>").encode("turbohtml-no-such-codec")
 
 
 @pytest.mark.parametrize(

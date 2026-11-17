@@ -43,6 +43,12 @@ def _spec() -> str:
     return corpus_text(relative, encoding)
 
 
+@cache
+def _repeated_spec() -> str:
+    # Return the whatwg spec repeated end to end, so each document query walks a document of ~8 MB.
+    return _spec() * 36
+
+
 def _xpath_case() -> tuple[str, str]:
     # Return the ``(kind, document)`` pair the xpath operation expects, over the spec.
     return "//a[@href]", _spec()
@@ -107,6 +113,9 @@ _DOCUMENT_OPS: Final[tuple[str, ...]] = (
 
 _LOADERS: Final[dict[str, Callable[[], Case]]] = dict.fromkeys(_DOCUMENT_OPS, _spec)
 _LOADERS["xpath"] = _xpath_case
+_LOADERS.update(
+    dict.fromkeys(("find", "select", "select-has", "match", "extract-text", "strip-comments"), _repeated_spec)
+)
 _LOADERS["escape"] = partial(corpus.corpus, "war-and-peace/2600.txt", _TEXT_BYTES)
 _LOADERS["unescape"] = partial(corpus.corpus, "war-and-peace/2600-h/2600-h.htm", _TEXT_BYTES)
 _LOADERS["encoding"] = lambda: corpus.corpus("war-and-peace/2600.txt", _TEXT_BYTES).encode("cp1252")
@@ -602,8 +611,11 @@ def benchmarks() -> Iterator[tuple[str, Timed, Callable[[], Case]]]:
     # A noise-prone inline operation is surfaced under its corpus-qualified id (see :data:`_RESIZED`) so CodSpeed
     # retires the flaky small-input benchmark and gates the large-input one as a fresh identity.
     for name, (run, _owner) in OPERATIONS.items():
-        if name == "startup" or name in _ADDITIONAL_CASES:
-            continue  # Explicit cases retain their configured position; startup needs a fresh interpreter.
+        # Explicit cases retain their configured position; startup needs a fresh interpreter. The zero-stage dispatch
+        # case runs too few instructions to clear Valgrind's jitter floor, and its 1-, 4- and 16-stage ids gate the
+        # same code.
+        if name in {"startup", "transform-dispatch"} or name in _ADDITIONAL_CASES:
+            continue
         identity = _RESIZED[name][0] if name in _RESIZED else name
         yield identity, run, _loader_for(name)
     for identity, (name, case_index) in _ADDITIONAL_CASES.items():

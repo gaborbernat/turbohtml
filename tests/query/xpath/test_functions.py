@@ -13,7 +13,6 @@ from xml.etree import ElementTree as ET  # ruff:ignore[suspicious-xml-etree-impo
 
 import pytest
 from bench.ci import benchmarks
-from bench.core import OPERATIONS
 from bench.operations import INPUTS
 
 import turbohtml
@@ -219,6 +218,36 @@ def doc() -> turbohtml.Node:
 )
 def test_scalar_and_boolean(doc: turbohtml.Node, expr: str, *, expected: float | str | bool) -> None:
     assert doc.xpath(expr) == expected
+
+
+@pytest.mark.parametrize("function", ["name", "local-name"])
+@pytest.mark.parametrize(
+    "attribute",
+    [
+        pytest.param("class", id="ascii"),
+        pytest.param("été", id="latin-1"),
+        pytest.param("ж", id="cyrillic"),
+        pytest.param("a\ud800b", id="lone-surrogate"),
+    ],
+)
+def test_name_of_attribute_keeps_its_characters(function: str, attribute: str) -> None:
+    assert turbohtml.parse(f"<p {attribute}='1'>x</p>").xpath(f"{function}(//p/@*)") == attribute
+
+
+@pytest.mark.parametrize(
+    "attribute",
+    [
+        pytest.param("class", id="ascii"),
+        pytest.param("été", id="latin-1"),
+        pytest.param("a\ud800b", id="lone-surrogate"),
+    ],
+)
+def test_smart_string_attrname_keeps_its_characters(attribute: str) -> None:
+    results = turbohtml.parse(f"<p {attribute}='1'>x</p>").xpath("//p/@*", smart_strings=True)
+    assert isinstance(results, list)
+    (value,) = results
+    assert isinstance(value, turbohtml.XPathString)
+    assert value.attrname == attribute
 
 
 @pytest.mark.parametrize(
@@ -1129,7 +1158,7 @@ def test_id_nodes_benchmark_output(name: str) -> None:
     ],
 )
 def test_translate_benchmark_result(case: int, expected: str) -> None:
-    expression, source = cast("tuple[str, str]", INPUTS["xpath-translate"]()[case][1])
+    expression, source = cast("tuple[str, ...]", INPUTS["xpath-translate"]()[case][1])[:2]
     document: Final = parse(source)
     assert document.xpath(expression) == expected
 
@@ -1812,9 +1841,13 @@ def test_concat_benchmark_output(name: str, length: int) -> None:
 @pytest.mark.parametrize("name", ["xpath-replace", "xpath-replace-short"])
 def test_replace_benchmark_output(name: str) -> None:
     _, _, load = next(benchmark for benchmark in benchmarks() if benchmark[0] == name)
-    case = cast("tuple[str, str, str, str]", load())
-    operation = cast("Callable[[tuple[str, str, str, str]], str]", OPERATIONS["xpath-replace"][0])
-    assert operation(case) == case[3]
+    text, search, replacement, expected = cast("tuple[str, ...]", load())[:4]
+    assert (
+        parse("<p></p>").xpath(
+            "str:replace($text, $search, $replacement)", text=text, search=search, replacement=replacement
+        )
+        == expected
+    )
 
 
 @pytest.mark.parametrize("function", [pytest.param("re:test", id="exslt"), pytest.param("matches", id="xpath2")])

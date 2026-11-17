@@ -883,8 +883,8 @@ static XP_STEP_INLINE int node_test_matches(struct th_node *node, const xn *step
         return node->type == TH_NODE_COMMENT;
     case NT_PI:
         return node->type == TH_NODE_PI;
-    default: /* NT_NODE */
-        return 1;
+    default: /* NT_NODE: every node but a doctype, which XPath 1.0 has no node type for */
+        return node->type != TH_NODE_DOCTYPE;
     }
 }
 
@@ -1512,16 +1512,150 @@ static void root_store(addr_map *roots, const struct th_node *node, struct th_no
     roots->entries[addr_slot(roots, node)].root = root;
 }
 
+/* The walk memo: what a predicate's axis walk found from each node it has passed, keyed by the node and a tag of the
+   step and the walk (enum xp_walk_kind). Contexts whose walks share a stretch of the tree then read the stretch once.
+   An entry summarizes the walk from its node in one direction: the nearest good node the walk reaches, and how many
+   good nodes it reaches. */
+enum xp_walk_kind {
+    XW_GOOD,      /* the node passes the step's test and its rest; cached only when the step has a rest */
+    XW_PARENT,    /* up through the ancestors */
+    XW_PREV,      /* back through the preceding siblings */
+    XW_NEXT,      /* on through the following siblings */
+    XW_DOC_PREV,  /* back through the document, ancestors included */
+    XW_DOC_NEXT,  /* on through the document, descendants included */
+    XW_AFTER,     /* the node after the node's whole subtree; its nearest field, count unused */
+    XW_PRECEDING, /* the nearest good preceding node that is not an ancestor: the preceding axis's answer */
+};
+
+typedef struct {
+    const struct th_node *node;
+    uint32_t tag;
+    struct th_node *nearest;
+    Py_ssize_t count;
+} walk_entry;
+
+typedef struct {
+    walk_entry *entries;
+    size_t capacity;
+    size_t count;
+} walk_map;
+
+static size_t walk_slot(const walk_map *map, const struct th_node *node, uint32_t tag) {
+    uint64_t key = node_address_hash(node) + (uint64_t)tag * UINT64_C(0x9E3779B97F4A7C15);
+    size_t slot = (size_t)key & (map->capacity - 1);
+    while (map->entries[slot].node != NULL && (map->entries[slot].node != node || map->entries[slot].tag != tag)) {
+        slot = (slot + 1) & (map->capacity - 1);
+    }
+    return slot;
+}
+
+static walk_entry *walk_find(const walk_map *map, const struct th_node *node, uint32_t tag) {
+    if (map->capacity == 0) {
+        return NULL;
+    }
+    walk_entry *entry = &map->entries[walk_slot(map, node, tag)];
+    return entry->node == NULL ? NULL : entry;
+}
+
+/* Add an entry the caller has just found absent. */
+static int walk_put(walk_map *map, const struct th_node *node, uint32_t tag, struct th_node *nearest,
+                    Py_ssize_t count) {
+    if ((map->count + 1) * 2 > map->capacity) {
+        size_t capacity = map->capacity == 0 ? 64 : map->capacity * 2;
+        walk_map grown = {PyMem_Calloc(capacity, sizeof(walk_entry)), capacity, map->count};
+        if (grown.entries == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;               /* GCOVR_EXCL_LINE */
+        }
+        for (size_t index = 0; index < map->capacity; index++) {
+            if (map->entries[index].node != NULL) {
+                grown.entries[walk_slot(&grown, map->entries[index].node, map->entries[index].tag)] =
+                    map->entries[index];
+            }
+        }
+        PyMem_Free(map->entries);
+        *map = grown;
+    }
+    map->entries[walk_slot(map, node, tag)] = (walk_entry){node, tag, nearest, count};
+    map->count++;
+    return 0;
+}
+
+/* The positional index of one tree, built once per evaluation for the steps whose positional predicate the walk memo
+   cannot answer (index_select). The nodes are numbered in document order, and each subtree spans the numbers from its
+   own up to end. A chain links each good node to the nearest good node above it on an axis (its nearest good ancestor,
+   or the nearest good sibling on one side), counts the good nodes above it, and carries a skew-binary jump pointer, so
+   the node a given number of links away is found in O(log n). */
+typedef struct {
+    Py_ssize_t *parent; /* the next node of the chain, or -1 */
+    Py_ssize_t *depth;  /* the good nodes above this one on the chain */
+    Py_ssize_t *jump;   /* a jump pointer, see chain_jump */
+} xp_chain;
+
+typedef struct xp_steps xp_steps;
+
+typedef struct xp_index xp_index;
+
+struct xp_steps {
+    int32_t step;
+    int chains; /* XP_CHAIN_* bits of the chains built so far */
+    Py_ssize_t count;
+    Py_ssize_t *good;   /* the document-order numbers of the step's good nodes, ascending */
+    Py_ssize_t *before; /* before[n]: the good nodes numbered below n */
+    xp_chain ancestor;  /* parent: the nearest good proper ancestor */
+    xp_chain next;      /* parent: the nearest good following sibling */
+    xp_chain prev;      /* parent: the nearest good preceding sibling */
+    xp_steps *link;
+};
+
+struct xp_index {
+    struct th_node *root;
+    Py_ssize_t size;
+    struct th_node **nodes; /* in document order */
+    Py_ssize_t *end;        /* the last number of each node's subtree */
+    addr_map numbers;       /* the document-order number of each node, plus one */
+    xp_steps *steps;
+};
+
+static void xp_chain_free(xp_chain *chain) {
+    PyMem_Free(chain->parent);
+    PyMem_Free(chain->depth);
+    PyMem_Free(chain->jump);
+}
+
+void xp_index_free(xp_index *index) {
+    if (index == NULL) {
+        return;
+    }
+    xp_steps *steps = index->steps;
+    while (steps != NULL) {
+        xp_steps *following = steps->link;
+        xp_chain_free(&steps->ancestor);
+        xp_chain_free(&steps->next);
+        xp_chain_free(&steps->prev);
+        PyMem_Free(steps->good);
+        PyMem_Free(steps->before);
+        PyMem_Free(steps);
+        steps = following;
+    }
+    PyMem_Free(index->nodes);
+    PyMem_Free(index->end);
+    PyMem_Free(index->numbers.entries);
+    PyMem_Free(index);
+}
+
 /* The positions map holds the sibling positions the evaluation has numbered, keyed by child. A parent's children are
    numbered together the first time two of them need ordering, so a set that keeps meeting one long sibling list walks
    it once per evaluation. The roots map holds the root a deep climb reached for each node it passed (climb_memoized),
-   as of `unlinks`. langs is the evaluation's lang() memo when its caller passes none (xp_lang_memoized). */
+   as of `unlinks`. langs is the evaluation's lang() memo when its caller passes none (xp_lang_memoized). index holds
+   the positional indexes of the evaluation's trees (index_select). */
 struct xp_caches {
     xr_cache regex;
     addr_map positions;
     addr_map roots;
     uint64_t unlinks;
     xp_lang_memo *langs;
+    walk_map walks;
+    xp_index *index;
 };
 
 static xp_caches *caches_get(xp_caches **caches) {
@@ -2258,6 +2392,19 @@ Py_UCS4 *ucs4_from_ascii(const char *src, Py_ssize_t length, Py_ssize_t *len) {
     return buffer;
 }
 
+/* A UTF-8 name as code points. Surrogatepass reads back a lone surrogate a name holds, which no strict decode accepts.
+ */
+Py_UCS4 *ucs4_from_utf8(const char *src, Py_ssize_t length, Py_ssize_t *len) {
+    PyObject *text = PyUnicode_DecodeUTF8(src, length, "surrogatepass");
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: a name with a lone surrogate decodes, so only allocation can fail */
+        return NULL;    /* GCOVR_EXCL_LINE */
+    }
+    *len = PyUnicode_GET_LENGTH(text);
+    Py_UCS4 *buffer = PyUnicode_AsUCS4Copy(text); /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
+    Py_DECREF(text);
+    return buffer;
+}
+
 Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len) {
     if (item.attr == -2) {
         return ucs4_from_ascii(XP_XML_NS_URI, sizeof(XP_XML_NS_URI) - 1, len);
@@ -2730,6 +2877,8 @@ static int eval_path_step(const xp_program *prog, const xn *step, const step_mat
                           xp_nodeset *current, xp_nodeset *following);
 static int eval_path_step_inner(const xp_program *prog, const xn *step, const step_match *match, xp_ctx *ctx,
                                 xp_nodeset *current, xp_nodeset *following, xp_nodeset *accepted, xp_seen *seen);
+static int eval_steps(const xp_program *prog, int32_t first, int based, xp_ctx *ctx, xp_nodeset *contexts,
+                      xp_nodeset *current, xp_nodeset *following, int exists);
 
 static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_nodeset *out, xp_nodeset *current,
                            xp_nodeset *following, int exists) {
@@ -2760,7 +2909,17 @@ static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx
             contexts = &initial;
         }
     }
-    for (int32_t si = root->first; si >= 0; si = prog->nodes[si].next) {
+    int rc = eval_steps(prog, root->first, root->second >= 0, ctx, contexts, current, following, exists);
+    if (rc < 0) {
+        return rc;
+    }
+    *out = *current;
+    return 0;
+}
+
+static int eval_steps(const xp_program *prog, int32_t first, int based, xp_ctx *ctx, xp_nodeset *contexts,
+                      xp_nodeset *current, xp_nodeset *following, int exists) {
+    for (int32_t si = first; si >= 0; si = prog->nodes[si].next) {
         const xn *step = &prog->nodes[si];
         step_match match;
         int resolved = build_step_match(ctx, step, &match);
@@ -2784,7 +2943,7 @@ static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx
            apply_step hands a reverse axis back in document order for it. */
         int single_walk = contexts->len == 1 && contexts->items[0].attr == -1 && step->first < 0;
         match.document_order = single_walk;
-        match.unsorted = si == root->first && root->second >= 0;
+        match.unsorted = si == first && based;
         int stepped = eval_path_step(prog, step, &match, ctx, contexts, following);
         if (stepped < 0) {
             xp_nodeset_free(current);
@@ -2802,7 +2961,6 @@ static int eval_path_inner(const xp_program *prog, int32_t path_idx, xp_ctx *ctx
         }
     }
     xp_nodeset_free(following);
-    *out = *current;
     return 0;
 }
 
@@ -3034,21 +3192,14 @@ static Py_ssize_t first_passing(const xp_hop *hops, int count, Py_ssize_t size, 
 static int compare_spans(const xp_hop *hops, int count, Py_ssize_t size, int op, double bound, xp_spans *out) {
     int nan_bound = isnan(bound);
     if (nan_bound) {
-#ifdef XP_EQ_VIA_PYTHON
-        return 0;
-#else
         return op == XN_NE ? spans_add(out, 1, size) : 0;
-#endif
     }
     int rising = hops_apply(hops, count, 1) <= hops_apply(hops, count, size);
     Py_ssize_t below_end = first_passing(hops, count, size, rising ? XN_GE : XN_LT, bound);
     Py_ssize_t above_end = first_passing(hops, count, size, rising ? XN_GT : XN_LE, bound);
-#ifndef XP_EQ_VIA_PYTHON
     Py_ssize_t equal_lo = rising ? below_end : above_end;
     Py_ssize_t equal_hi = (rising ? above_end : below_end) - 1;
-#endif
     switch (op) {
-#ifndef XP_EQ_VIA_PYTHON
     case XN_EQ:
         return spans_add(out, equal_lo, equal_hi);
     case XN_NE:
@@ -3056,7 +3207,6 @@ static int compare_spans(const xp_hop *hops, int count, Py_ssize_t size, int op,
             return -1;                             /* GCOVR_EXCL_LINE */
         }
         return spans_add(out, equal_hi + 1, size);
-#endif
     case XN_LT:
         return rising ? spans_add(out, 1, below_end - 1) : spans_add(out, below_end, size);
     case XN_LE:
@@ -3163,12 +3313,8 @@ static int formula_spans(const xp_program *prog, int32_t index, xp_ctx *pctx, in
         return rc;
     }
     /* a node-set compares member by member, and a boolean makes = and != compare truth values */
-#ifdef XP_EQ_VIA_PYTHON
-    int scalar = value.kind == XP_NUMBER || value.kind == XP_STRING || value.kind == XP_BOOLEAN;
-#else
     int scalar = value.kind == XP_NUMBER || value.kind == XP_STRING ||
                  (value.kind == XP_BOOLEAN && node->kind != XN_EQ && node->kind != XN_NE);
-#endif
     double bound = scalar ? to_number(pctx->tree, &value) : 0;
     xp_result_free(&value);
     if (!scalar) {
@@ -3182,11 +3328,7 @@ static int formula_spans(const xp_program *prog, int32_t index, xp_ctx *pctx, in
     }
     int op = node->kind;
     if (!left) { /* bound op chain is chain op' bound */
-#ifdef XP_EQ_VIA_PYTHON
-        op = op == XN_LT ? XN_GT : op == XN_LE ? XN_GE : op == XN_GT ? XN_LT : XN_LE;
-#else
         op = op == XN_LT ? XN_GT : op == XN_LE ? XN_GE : op == XN_GT ? XN_LT : op == XN_GE ? XN_LE : op;
-#endif
     }
     return compare_spans(hops, count, size, op, bound, out);
 }
@@ -4048,9 +4190,1129 @@ static int eval_path_step_inner(const xp_program *prog, const xn *step, const st
     return 0;
 }
 
+/* A predicate path with one step on an ancestor, sibling, preceding or following axis, and at most a rest of steps
+   after it, answers from the walk memo: a predicate evaluated from each of many nodes would otherwise walk the same
+   stretch again for each, which is quadratic when no node passes the test. The first XP_WALK_SCAN candidates are walked
+   directly, so a predicate that finds its node near by builds no memo. Each answer is the one the plain walk gives,
+   and the memo is used only when no Python code can run during the evaluation to move nodes. */
+#define XP_WALK_SCAN 16
+
+typedef struct {
+    struct th_node **items;
+    size_t len;
+    size_t cap;
+} walk_chain;
+
+static int chain_push(walk_chain *chain, struct th_node *node) {
+    if (chain->len == chain->cap) {
+        size_t cap = chain->cap == 0 ? 64 : chain->cap * 2;
+        struct th_node **items = PyMem_Realloc(chain->items, cap * sizeof(*items));
+        if (items == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;       /* GCOVR_EXCL_LINE */
+        }
+        chain->items = items;
+        chain->cap = cap;
+    }
+    chain->items[chain->len++] = node;
+    return 0;
+}
+
+static int walk_store(walk_map *walks, const walk_chain *chain, uint32_t tag, struct th_node *nearest) {
+    for (size_t index = 0; index < chain->len; index++) {
+        if (walk_put(walks, chain->items[index], tag, nearest, 0) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                                                   /* GCOVR_EXCL_LINE */
+        }
+    }
+    return 0;
+}
+
+typedef struct {
+    const xp_program *prog;
+    const xn *step;
+    step_match match;
+    xp_ctx *ctx;
+    walk_map *walks;
+    uint32_t base;   /* the step's index shifted past the walk kinds */
+    int32_t rest;    /* the step after the walked one, or -1 */
+    int predicated;  /* the predicates ahead of stop judge each node */
+    int judges_rest; /* the rest of the path judges each node, unless stop takes the nearest node that passes the rest
+                      */
+    int32_t stop;    /* the trailing predicate [1] that takes the nearest passing node, or -1 */
+    enum xp_axis axis;
+    int owned; /* the context is an attribute or namespace node, and the walk starts at its owner element */
+} walk_plan;
+
+static struct th_node *walk_next(struct th_node *node, enum xp_walk_kind kind) {
+    switch (kind) {
+    case XW_PARENT:
+        return node->parent;
+    case XW_PREV:
+        return node->prev_sibling;
+    case XW_NEXT:
+        return node->next_sibling;
+    case XW_DOC_PREV:
+        return document_previous(node);
+    default: /* XW_DOC_NEXT */
+        return document_next(node);
+    }
+}
+
+/* The nodes the rest of the path selects from item, into out, which is empty on entry. */
+static int walk_rest_item(const walk_plan *plan, xp_item item, xp_nodeset *out) {
+    xp_ctx sub = *plan->ctx;
+    sub.node = item.node;
+    sub.attr = item.attr;
+    sub.pos = 1;
+    sub.size = 1;
+    sub.depth += XP_PREDICATE_DEPTH;
+    xp_nodeset initial = {.items = &item, .len = 1};
+    xp_nodeset following = {0};
+    return eval_steps(plan->prog, plan->rest, 0, &sub, &initial, out, &following, 1);
+}
+
+/* The nodes the rest of the path selects from node, into out, which is empty on entry. */
+static int walk_rest_run(const walk_plan *plan, struct th_node *node, xp_nodeset *out) {
+    return walk_rest_item(plan, (xp_item){node, -1}, out);
+}
+
+static int walk_rest_holds(const walk_plan *plan, struct th_node *node) {
+    xp_nodeset found = {0};
+    int rc = walk_rest_run(plan, node, &found);
+    if (rc < 0) {
+        return rc;
+    }
+    int holds = found.len > 0;
+    xp_nodeset_free(&found);
+    return holds;
+}
+
+/* Whether node passes the step's predicates, which read nothing but the node. */
+static int walk_predicates_hold(const walk_plan *plan, struct th_node *node) {
+    xp_item item = {node, -1};
+    xp_nodeset one = {.items = &item, .len = 1};
+    int rc = apply_predicates(plan->prog, plan->step->first, plan->stop, plan->ctx, &one,
+                              XP_HELD_DEPTH + XP_PREDICATE_DEPTH);
+    return rc < 0 ? rc : (int)one.len;
+}
+
+static int walk_good(const walk_plan *plan, struct th_node *node) {
+    TH_WORK_STEP();
+    int matched = node_test_matches(node, plan->step, &plan->match);
+    if (matched <= 0 || (!plan->predicated && !plan->judges_rest)) {
+        return matched;
+    }
+    walk_entry *known = walk_find(plan->walks, node, plan->base + XW_GOOD);
+    if (known != NULL) {
+        return (int)known->count;
+    }
+    int holds = plan->predicated ? walk_predicates_hold(plan, node) : 1;
+    if (holds > 0 && plan->judges_rest) {
+        holds = walk_rest_holds(plan, node);
+    }
+    if (holds < 0) {
+        return holds;
+    }
+    if (walk_put(plan->walks, node, plan->base + XW_GOOD, NULL, holds) <
+        0) {       /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1; /* GCOVR_EXCL_LINE */
+    }
+    return holds;
+}
+
+/* The summary of the walk from node in kind's direction, strictly after node. The nodes the walk has not passed yet
+   are collected first and then filled from the far end, so each node is passed once per evaluation. */
+static int walk_fill(const walk_plan *plan, enum xp_walk_kind kind, struct th_node *node, struct th_node **nearest,
+                     Py_ssize_t *count) {
+    if (node == NULL) {
+        *nearest = NULL;
+        *count = 0;
+        return 0;
+    }
+    uint32_t tag = plan->base + kind;
+    walk_entry *known = walk_find(plan->walks, node, tag);
+    if (known != NULL) {
+        *nearest = known->nearest;
+        *count = known->count;
+        return 0;
+    }
+    walk_chain chain = {NULL, 0, 0};
+    struct th_node *beyond = node;
+    int rc = 0;
+    while (beyond != NULL && walk_find(plan->walks, beyond, tag) == NULL) {
+        TH_WORK_STEP();
+        rc = chain_push(&chain, beyond);
+        if (rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            break;    /* GCOVR_EXCL_LINE */
+        }
+        beyond = walk_next(beyond, kind);
+    }
+    struct th_node *below_nearest = NULL;
+    Py_ssize_t below_count = 0;
+    if (rc == 0 && beyond != NULL) {
+        walk_entry *entry = walk_find(plan->walks, beyond, tag);
+        below_nearest = entry->nearest;
+        below_count = entry->count;
+    }
+    for (size_t index = chain.len; rc == 0 && index-- > 0;) {
+        struct th_node *next = index + 1 < chain.len ? chain.items[index + 1] : beyond;
+        int good = next != NULL ? walk_good(plan, next) : 0;
+        if (good < 0) {
+            rc = good;
+            break;
+        }
+        struct th_node *value = good ? next : below_nearest;
+        Py_ssize_t total = good + below_count;
+        if (walk_put(plan->walks, chain.items[index], tag, value, total) < 0) { /* GCOVR_EXCL_BR_LINE: allocation */
+            rc = -1;                                                            /* GCOVR_EXCL_LINE */
+            break;                                                              /* GCOVR_EXCL_LINE */
+        }
+        below_nearest = value;
+        below_count = total;
+    }
+    PyMem_Free(chain.items);
+    if (rc == 0) {
+        *nearest = below_nearest;
+        *count = below_count;
+    }
+    return rc;
+}
+
+/* The node after the whole subtree of node, or NULL when none follows it. */
+static int walk_after(const walk_plan *plan, struct th_node *node, struct th_node **after) {
+    uint32_t tag = plan->base + XW_AFTER;
+    walk_chain chain = {NULL, 0, 0};
+    struct th_node *answer = NULL;
+    struct th_node *cur = node;
+    int rc = 0;
+    for (;;) {
+        walk_entry *known = walk_find(plan->walks, cur, tag);
+        if (known != NULL) {
+            answer = known->nearest;
+            break;
+        }
+        rc = chain_push(&chain, cur);
+        if (rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            break;    /* GCOVR_EXCL_LINE */
+        }
+        if (cur->next_sibling != NULL) {
+            answer = cur->next_sibling;
+            break;
+        }
+        if (cur->parent == NULL) {
+            break;
+        }
+        cur = cur->parent;
+    }
+    if (rc == 0) {
+        rc = walk_store(plan->walks, &chain, tag, answer);
+    }
+    PyMem_Free(chain.items);
+    *after = answer;
+    return rc;
+}
+
+/* The nearest good preceding node of node that is not an ancestor of it. The nearest good node before node is either
+   such a node or an ancestor; an ancestor then is the nearest good ancestor, and nothing good lies between it and node,
+   so the answer for node is the answer for that ancestor. */
+static int walk_preceding(const walk_plan *plan, struct th_node *node, struct th_node **nearest) {
+    uint32_t tag = plan->base + XW_PRECEDING;
+    walk_chain chain = {NULL, 0, 0};
+    struct th_node *answer = NULL;
+    struct th_node *cur = node;
+    int rc = 0;
+    for (;;) {
+        walk_entry *known = walk_find(plan->walks, cur, tag);
+        if (known != NULL) {
+            answer = known->nearest;
+            break;
+        }
+        rc = chain_push(&chain, cur);
+        if (rc < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            break;    /* GCOVR_EXCL_LINE */
+        }
+        struct th_node *before = NULL;
+        struct th_node *ancestor = NULL;
+        Py_ssize_t count;
+        rc = walk_fill(plan, XW_DOC_PREV, cur, &before, &count);
+        if (rc == 0) {
+            rc = walk_fill(plan, XW_PARENT, cur, &ancestor, &count);
+        }
+        if (rc < 0) {
+            break;
+        }
+        if (before == NULL || before != ancestor) {
+            answer = before;
+            break;
+        }
+        cur = before;
+    }
+    if (rc == 0) {
+        rc = walk_store(plan->walks, &chain, tag, answer);
+    }
+    PyMem_Free(chain.items);
+    *nearest = answer;
+    return rc;
+}
+
+/* The nearest good node on the axis from node, in the order the axis lists its nodes, and how many there are. */
+static int walk_axis(const walk_plan *plan, struct th_node *node, struct th_node **nearest, Py_ssize_t *count) {
+    switch (plan->axis) {
+    case AX_ANCESTOR:
+        return walk_fill(plan, XW_PARENT, node, nearest, count);
+    case AX_ANCESTOR_OR_SELF: {
+        int good = walk_good(plan, node);
+        if (good < 0) {
+            return good;
+        }
+        struct th_node *up = NULL;
+        Py_ssize_t up_count = 0;
+        int rc = walk_fill(plan, XW_PARENT, node, &up, &up_count);
+        if (rc < 0) {
+            return rc;
+        }
+        *nearest = good ? node : up;
+        *count = good + up_count;
+        return 0;
+    }
+    case AX_PRECEDING_SIBLING:
+        return walk_fill(plan, XW_PREV, node, nearest, count);
+    case AX_FOLLOWING_SIBLING:
+        return walk_fill(plan, XW_NEXT, node, nearest, count);
+    case AX_PRECEDING: {
+        struct th_node *before = NULL;
+        struct th_node *ancestor = NULL;
+        Py_ssize_t before_count = 0;
+        Py_ssize_t ancestor_count = 0;
+        int rc = walk_fill(plan, XW_DOC_PREV, node, &before, &before_count);
+        if (rc == 0) {
+            rc = walk_fill(plan, XW_PARENT, node, &ancestor, &ancestor_count);
+        }
+        if (rc == 0) {
+            rc = walk_preceding(plan, node, nearest);
+        }
+        if (rc == 0) {
+            *count = before_count - ancestor_count;
+        }
+        return rc;
+    }
+    default: { /* AX_FOLLOWING */
+        struct th_node *after = plan->owned ? node->first_child : NULL;
+        int rc = after != NULL ? 0 : walk_after(plan, node, &after);
+        if (rc < 0 || after == NULL) {
+            *nearest = NULL;
+            *count = 0;
+            return rc;
+        }
+        int good = walk_good(plan, after);
+        if (good < 0) {
+            return good;
+        }
+        struct th_node *later = NULL;
+        Py_ssize_t later_count = 0;
+        rc = walk_fill(plan, XW_DOC_NEXT, after, &later, &later_count);
+        if (rc < 0) {
+            return rc;
+        }
+        *nearest = good ? after : later;
+        *count = good + later_count;
+        return 0;
+    }
+    }
+}
+
+/* The plain walk over the first XP_WALK_SCAN candidates, in the order apply_first_step visits them. Returns 0 with
+   nearest set when the walk settles, 1 when it runs out of candidates first, or a negative error. */
+static int walk_scan(const walk_plan *plan, struct th_node *node, struct th_node **nearest) {
+    int budget = XP_WALK_SCAN;
+    enum xp_walk_kind kind = XW_PARENT;
+    struct th_node *ancestor = NULL;
+    struct th_node *candidate = NULL;
+    switch (plan->axis) {
+    case AX_ANCESTOR:
+        candidate = node->parent;
+        break;
+    case AX_ANCESTOR_OR_SELF:
+        candidate = node;
+        break;
+    case AX_PRECEDING_SIBLING:
+        kind = XW_PREV;
+        candidate = node->prev_sibling;
+        break;
+    case AX_FOLLOWING_SIBLING:
+        kind = XW_NEXT;
+        candidate = node->next_sibling;
+        break;
+    case AX_PRECEDING:
+        kind = XW_DOC_PREV;
+        ancestor = node->parent;
+        candidate = document_previous(node);
+        break;
+    default: { /* AX_FOLLOWING */
+        kind = XW_DOC_NEXT;
+        if (plan->owned && node->first_child != NULL) {
+            candidate = node->first_child;
+            break;
+        }
+        struct th_node *up = node;
+        for (; up != NULL && up->next_sibling == NULL; up = up->parent) {
+            if (--budget == 0) {
+                return 1;
+            }
+        }
+        candidate = up == NULL ? NULL : up->next_sibling;
+        break;
+    }
+    }
+    for (; candidate != NULL; candidate = walk_next(candidate, kind)) {
+        if (budget-- == 0) {
+            return 1;
+        }
+        if (candidate == ancestor) {
+            ancestor = candidate->parent;
+            continue;
+        }
+        int good = walk_good(plan, candidate);
+        if (good < 0) {
+            return good;
+        }
+        if (good) {
+            *nearest = candidate;
+            return 0;
+        }
+    }
+    *nearest = NULL;
+    return 0;
+}
+
+static int walk_search(const walk_plan *plan, struct th_node *node, struct th_node **nearest) {
+    int rc = walk_scan(plan, node, nearest);
+    if (rc != 1) {
+        return rc < 0 ? rc : 0;
+    }
+    Py_ssize_t count = 0;
+    return walk_axis(plan, node, nearest, &count);
+}
+
+/* The position a number selects, 1 to 2^52 when it is a whole number, or 0 when no position equals it. */
+static Py_ssize_t number_position(double value) {
+    if (floor(value) != value || value < 1 || value > 4503599627370496.0) {
+        return 0;
+    }
+    return (Py_ssize_t)value;
+}
+
+#define XP_POSITION_LAST (-1)
+#define XP_POSITION_ANY (-2) /* the existence of any node the axis selects, with no position */
+
+/* Whether expr is a call to the named function with no arguments. */
+static int is_nullary_call(const xn *expr, const char *name) {
+    return expr->kind == XN_FUNC && expr->first < 0 &&
+           ucs4_eq_ascii(expr->str, expr->str_len, name, (Py_ssize_t)strlen(name));
+}
+
+/* The position a predicate operand selects: a number, or last(). Returns 0 for any other operand. */
+static int selection_operand(const xp_program *prog, int32_t index, Py_ssize_t *target) {
+    const xn *expr = &prog->nodes[index];
+    if (expr->kind == XN_NUM) {
+        *target = number_position(expr->num);
+        return 1;
+    }
+    if (is_nullary_call(expr, "last")) {
+        *target = XP_POSITION_LAST;
+        return 1;
+    }
+    return 0;
+}
+
+/* Whether an operand is a call to position() with no arguments. */
+static int position_call(const xp_program *prog, int32_t index) {
+    return is_nullary_call(&prog->nodes[index], "position");
+}
+
+/* Reads a predicate that selects by position, as a number, last(), or position() equal to either. target receives the
+   selected position (1-based), XP_POSITION_LAST, or 0 for a number no position equals. Returns 0 for any other
+   predicate. */
+static int position_selection(const xp_program *prog, int32_t index, Py_ssize_t *target) {
+    const xn *expr = &prog->nodes[index];
+    if (expr->kind == XN_EQ) {
+        if (position_call(prog, expr->first)) {
+            return selection_operand(prog, expr->second, target);
+        }
+        return position_call(prog, expr->second) && selection_operand(prog, expr->first, target);
+    }
+    return selection_operand(prog, index, target);
+}
+
+/* How a step's positional predicates resolve, in one pass: 0 when none reads the position, 1 when the trailing one
+   selects the nearest node ([1]), 2 when it selects the target-th node or the last one, and -1 when the walks cannot
+   answer. Every predicate ahead of the positional one reads nothing but the node, so a walk judges each node with
+   them and takes the nodes that pass in proximity order. */
+static int walk_trailing(const xp_program *prog, const xn *step, Py_ssize_t *target) {
+    int kind = 0;
+    for (int32_t pred = step->first; pred >= 0; pred = prog->nodes[pred].next) {
+        if (!prog->nodes[pred].positional) {
+            continue;
+        }
+        if (prog->nodes[pred].next >= 0 || !position_selection(prog, prog->nodes[pred].first, target)) {
+            return -1;
+        }
+        kind = *target == 1 ? 1 : 2;
+    }
+    return kind;
+}
+
+/* The trailing positional predicate of a step, or -1 when it has none. */
+static int32_t walk_nearest_pred(const xp_program *prog, const xn *step) {
+    int32_t nearest = -1;
+    for (int32_t pred = step->first; pred >= 0; pred = prog->nodes[pred].next) {
+        if (prog->nodes[pred].positional) {
+            nearest = pred;
+        }
+    }
+    return nearest;
+}
+
+/* Whether path can be answered from the walk memo or the positional index: it starts from one node, and no Python
+   code can run during its evaluation, which could move nodes. The caller has checked that the path has a first step. */
+static int walk_gate(const xp_program *prog, int32_t path_idx, const xp_ctx *ctx) {
+    const xn *root = &prog->nodes[path_idx];
+    return root->second < 0 && !prog->has_python_calls && ctx->before_python == NULL && ctx->extension == NULL &&
+           ctx->name_test == NULL;
+}
+
+#define XP_ROUTE_NONE 0
+#define XP_ROUTE_WALK 1
+#define XP_ROUTE_INDEX 2
+
+/* How a path that is asked only whether it selects a node, or how many nodes it selects, is answered: by the walk memo
+   (XP_ROUTE_WALK, a relative or absolute path whose walked step has no positional predicate or only [1]), by the
+   positional index (XP_ROUTE_INDEX, the walked steps with a position, and the descendant axes), or by the plain walk.
+   Decided here once, so an ordinary path pays for one gate and one axis test. target receives the position the index
+   selects, or XP_POSITION_ANY. Python code could move nodes mid-evaluation, so walk_gate turns both routes off then. */
+static int path_route(const xp_program *prog, int32_t path_idx, const xp_ctx *ctx, Py_ssize_t *target) {
+    if (!walk_gate(prog, path_idx, ctx)) {
+        return XP_ROUTE_NONE;
+    }
+    const xn *root = &prog->nodes[path_idx];
+    const xn *step = &prog->nodes[root->first];
+    int restricted = 0;
+    switch (step->axis) {
+    case AX_DESCENDANT:
+    case AX_DESCENDANT_OR_SELF:
+        *target = XP_POSITION_ANY;
+        return walk_trailing(prog, step, target) >= 0 ? XP_ROUTE_INDEX : XP_ROUTE_NONE;
+    case AX_ANCESTOR:
+    case AX_PRECEDING:
+    case AX_FOLLOWING:
+        break;
+    case AX_ANCESTOR_OR_SELF:
+        restricted = ctx->attr != -1 && !root->absolute && step->test == NT_NODE;
+        break;
+    case AX_PRECEDING_SIBLING:
+    case AX_FOLLOWING_SIBLING:
+        restricted = ctx->attr != -1 && !root->absolute;
+        break;
+    default:
+        return XP_ROUTE_NONE;
+    }
+    int kind = walk_trailing(prog, step, target);
+    if (kind == 2) {
+        return XP_ROUTE_INDEX;
+    }
+    return kind >= 0 && !restricted ? XP_ROUTE_WALK : XP_ROUTE_NONE;
+}
+
+static int walk_begin(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, walk_plan *plan, struct th_node **start) {
+    const xn *root = &prog->nodes[path_idx];
+    const xn *step = &prog->nodes[root->first];
+    int rc = build_step_match(ctx, step, &plan->match);
+    if (rc < 0) {
+        return rc;
+    }
+    xp_caches *caches = caches_get(ctx->caches);
+    if (caches == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    plan->prog = prog;
+    plan->step = step;
+    plan->ctx = ctx;
+    plan->walks = &caches->walks;
+    plan->base = (uint32_t)root->first << 3;
+    plan->rest = step->next;
+    plan->stop = walk_nearest_pred(prog, step);
+    plan->predicated = step->first >= 0 && step->first != plan->stop;
+    plan->judges_rest = plan->rest >= 0 && plan->stop < 0;
+    plan->owned = ctx->attr != -1 && !root->absolute;
+    plan->axis = plan->owned && step->axis == AX_ANCESTOR ? AX_ANCESTOR_OR_SELF : step->axis;
+    *start = root->absolute ? tree_root(ctx) : ctx->node;
+    return 0;
+}
+
+/* The index's numbers run in document order and count from 0 at the tree's root. These are the chains' link kinds, see
+   xp_steps. */
+#define XP_CHAIN_ANCESTOR 1
+#define XP_CHAIN_NEXT 2
+#define XP_CHAIN_PREV 4
+
+static Py_ssize_t index_number(const xp_index *index, const struct th_node *node) {
+    return addr_map_find(&index->numbers, node) - 1;
+}
+
+static int index_good(const xp_steps *steps, Py_ssize_t number) {
+    return steps->before[number + 1] - steps->before[number] == 1;
+}
+
+/* The node after node in document order within the subtree of root, or NULL past the subtree's last node. */
+static struct th_node *subtree_next(struct th_node *node, const struct th_node *root) {
+    if (node->first_child != NULL) {
+        return node->first_child;
+    }
+    while (node != root && node->next_sibling == NULL) {
+        node = node->parent;
+    }
+    return node == root ? NULL : node->next_sibling;
+}
+
+static xp_index *index_build(struct th_node *root) {
+    Py_ssize_t size = 0;
+    for (struct th_node *node = root; node != NULL; node = subtree_next(node, root)) {
+        TH_WORK_STEP();
+        size++;
+    }
+    xp_index *index = PyMem_Calloc(1, sizeof(xp_index));
+    if (index == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return NULL;      /* GCOVR_EXCL_LINE */
+    }
+    index->root = root;
+    index->size = size;
+    index->nodes = PyMem_Malloc((size_t)size * sizeof(*index->nodes));
+    index->end = PyMem_Malloc((size_t)size * sizeof(*index->end));
+    if (index->nodes == NULL || index->end == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        xp_index_free(index);                         /* GCOVR_EXCL_LINE */
+        PyErr_NoMemory();                             /* GCOVR_EXCL_LINE */
+        return NULL;                                  /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t number = 0;
+    for (struct th_node *node = root; node != NULL; node = subtree_next(node, root)) {
+        TH_WORK_STEP();
+        index->nodes[number] = node;
+        index->end[number] = number;
+        if (addr_map_insert(&index->numbers, node, number + 1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            xp_index_free(index);                                     /* GCOVR_EXCL_LINE */
+            PyErr_NoMemory();                                         /* GCOVR_EXCL_LINE */
+            return NULL;                                              /* GCOVR_EXCL_LINE */
+        }
+        number++;
+    }
+    for (Py_ssize_t child = size - 1; child > 0; child--) {
+        Py_ssize_t parent = index_number(index, index->nodes[child]->parent);
+        if (index->end[child] > index->end[parent]) {
+            index->end[parent] = index->end[child];
+        }
+    }
+    return index;
+}
+
+/* The index of the evaluation's tree, built on first use. A variable cannot bring in a node of another tree (the
+   context and its variables share one tree), so every walk of the evaluation reads the same tree. */
+static int index_for(xp_ctx *ctx, struct th_node *root, xp_index **out) {
+    xp_caches *caches = caches_get(ctx->caches);
+    if (caches == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    if (caches->index == NULL) {
+        caches->index = index_build(root);
+        if (caches->index == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;               /* GCOVR_EXCL_LINE */
+        }
+    }
+    *out = caches->index;
+    return 0;
+}
+
+/* The good nodes of a step: those that pass its node test and the predicates ahead of its positional predicate. Built
+   on first use for each step of each tree. */
+static int steps_for(xp_index *index, walk_plan *plan, int32_t step_index, xp_steps **out) {
+    for (xp_steps *steps = index->steps; steps != NULL; steps = steps->link) {
+        if (steps->step == step_index) {
+            *out = steps;
+            return 0;
+        }
+    }
+    xp_steps *steps = PyMem_Calloc(1, sizeof(xp_steps));
+    if (steps == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    steps->step = step_index;
+    steps->link = index->steps;
+    index->steps = steps;
+    steps->good = PyMem_Malloc((size_t)index->size * sizeof(*steps->good));
+    steps->before = PyMem_Malloc(((size_t)index->size + 1) * sizeof(*steps->before));
+    if (steps->good == NULL || steps->before == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyErr_NoMemory();                               /* GCOVR_EXCL_LINE */
+        return -1;                                      /* GCOVR_EXCL_LINE */
+    }
+    steps->before[0] = 0;
+    for (Py_ssize_t number = 0; number < index->size; number++) {
+        int passed = walk_good(plan, index->nodes[number]);
+        if (passed < 0) {
+            return passed;
+        }
+        if (passed) {
+            steps->good[steps->count++] = number;
+        }
+        steps->before[number + 1] = steps->count;
+    }
+    *out = steps;
+    return 0;
+}
+
+static int chains_alloc(xp_chain *chain, Py_ssize_t size) {
+    size_t bytes = (size_t)size * sizeof(Py_ssize_t);
+    chain->parent = PyMem_Malloc(bytes);
+    chain->depth = PyMem_Malloc(bytes);
+    chain->jump = PyMem_Malloc(bytes);
+    if (chain->parent == NULL || chain->depth == NULL || chain->jump == NULL) { /* GCOVR_EXCL_BR_LINE: allocation */
+        PyErr_NoMemory();                                                       /* GCOVR_EXCL_LINE */
+        return -1;                                                              /* GCOVR_EXCL_LINE */
+    }
+    return 0;
+}
+
+/* Sets the depth and jump pointer of node, a good node under parent (-1 for the top of its chain). The jump is parent's
+   own jump when the two jumps parent spans are equal, else parent itself: the skew-binary jump pointers of Myers, so a
+   climb to any depth takes O(log n) steps. */
+static void chain_jump(xp_chain *chain, Py_ssize_t node, Py_ssize_t parent) {
+    if (parent < 0) {
+        chain->depth[node] = 0;
+        chain->jump[node] = node;
+        return;
+    }
+    Py_ssize_t above = chain->jump[parent];
+    chain->depth[node] = chain->depth[parent] + 1;
+    int spans_equal =
+        chain->depth[parent] - chain->depth[above] == chain->depth[above] - chain->depth[chain->jump[above]];
+    chain->jump[node] = spans_equal ? chain->jump[above] : parent;
+}
+
+/* The nearest good ancestor of every node, and the good ancestors above it, in one pass over document order: a stack
+   holds the good nodes whose subtrees still hold the current node. */
+static int chain_ancestor_build(xp_index *index, xp_steps *steps) {
+    xp_chain *chain = &steps->ancestor;
+    if (chains_alloc(chain, index->size) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                              /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t *stack = PyMem_Malloc((size_t)index->size * sizeof(*stack));
+    if (stack == NULL) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+        PyErr_NoMemory(); /* GCOVR_EXCL_LINE */
+        return -1;        /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t open = 0;
+    for (Py_ssize_t number = 0; number < index->size; number++) {
+        TH_WORK_STEP();
+        while (open > 0 && index->end[stack[open - 1]] < number) {
+            open--;
+        }
+        Py_ssize_t parent = open > 0 ? stack[open - 1] : -1;
+        chain->parent[number] = parent;
+        if (index_good(steps, number)) {
+            chain_jump(chain, number, parent);
+            stack[open++] = number;
+        } else {
+            chain->depth[number] = open;
+        }
+    }
+    PyMem_Free(stack);
+    return 0;
+}
+
+/* The nearest good following sibling (forward) or preceding sibling of every node, with the good siblings beyond it.
+   Each sibling list is walked from the side the chain points to, so a sibling's chain is ready before the sibling. */
+static int chain_sibling_build(xp_index *index, xp_steps *steps, xp_chain *chain, int forward) {
+    if (chains_alloc(chain, index->size) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return -1;                              /* GCOVR_EXCL_LINE */
+    }
+    chain->parent[0] = -1;
+    chain->depth[0] = 0;
+    chain->jump[0] = 0;
+    for (Py_ssize_t number = 0; number < index->size; number++) {
+        TH_WORK_STEP();
+        struct th_node *child = forward ? index->nodes[number]->last_child : index->nodes[number]->first_child;
+        Py_ssize_t nearest = -1;
+        while (child != NULL) {
+            Py_ssize_t sibling = index_number(index, child);
+            chain->parent[sibling] = nearest;
+            if (index_good(steps, sibling)) {
+                chain_jump(chain, sibling, nearest);
+                nearest = sibling;
+            }
+            child = forward ? child->prev_sibling : child->next_sibling;
+        }
+    }
+    return 0;
+}
+
+/* Builds the chain kind, if it is not built yet in this evaluation. */
+static int chain_ready(xp_index *index, xp_steps *steps, int kind) {
+    if ((steps->chains & kind) != 0) {
+        return 0;
+    }
+    int rc;
+    if (kind == XP_CHAIN_ANCESTOR) {
+        rc = chain_ancestor_build(index, steps);
+    } else {
+        rc = chain_sibling_build(index, steps, kind == XP_CHAIN_NEXT ? &steps->next : &steps->prev,
+                                 kind == XP_CHAIN_NEXT);
+    }
+    if (rc == 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+        steps->chains |= kind;
+    }
+    return rc;
+}
+
+/* The node depth links above node on its chain, found by climbing: a jump pointer is taken while it stays at or below
+   depth, so the climb takes O(log n) steps. */
+static Py_ssize_t chain_climb(const xp_chain *chain, Py_ssize_t node, Py_ssize_t depth) {
+    while (chain->depth[node] > depth) {
+        Py_ssize_t jump = chain->jump[node];
+        node = chain->depth[jump] >= depth ? jump : chain->parent[node];
+    }
+    return node;
+}
+
+/* The target-th node of a chain from start, nearest first, or the last one for XP_POSITION_LAST, and the chain's
+   length in total. -1 when the chain holds no node the target selects. */
+static Py_ssize_t chain_pick(const xp_chain *chain, Py_ssize_t start, Py_ssize_t target, Py_ssize_t *total) {
+    *total = start < 0 ? 0 : chain->depth[start] + 1;
+    if (target == XP_POSITION_LAST) {
+        target = *total;
+    }
+    if (target < 1 || target > *total) {
+        return -1;
+    }
+    return chain_climb(chain, start, chain->depth[start] - (target - 1));
+}
+
+/* The good non-ancestors of a node numbered self that lie above node: the good nodes numbered in (node, self), less the
+   good ancestors of self that lie there. top is the good ancestor count of the nearest good ancestor of self. */
+static Py_ssize_t nonancestors_above(const xp_steps *steps, const xp_chain *ancestor, Py_ssize_t below, Py_ssize_t top,
+                                     Py_ssize_t node) {
+    return below - 1 - steps->before[node] - (top - ancestor->depth[node]);
+}
+
+/* The target-th node of the preceding axis of the node numbered self, nearest first in reverse document order, or the
+   last one. Its candidates are the good nodes numbered below self that are not ancestors of it, which are the good
+   nodes below self less its good ancestors. The nearest candidate is the one with fewest candidates above it, so a
+   climb along the ancestor chain finds the deepest good ancestor (cut) that still lies above fewer than target
+   candidates; the answer is the candidate at the right rank between cut and the next good ancestor above it. */
+static Py_ssize_t preceding_pick(const xp_steps *steps, const xp_chain *ancestor, Py_ssize_t self, Py_ssize_t target,
+                                 Py_ssize_t *total) {
+    Py_ssize_t below = steps->before[self];
+    *total = below - ancestor->depth[self];
+    if (target == XP_POSITION_LAST) {
+        target = *total;
+    }
+    if (target < 1 || target > *total) {
+        return -1;
+    }
+    Py_ssize_t nearest = ancestor->parent[self];
+    if (nearest < 0) {
+        return steps->good[below - target];
+    }
+    Py_ssize_t top = ancestor->depth[nearest];
+    Py_ssize_t cut = -1;
+    if (nonancestors_above(steps, ancestor, below, top, nearest) < target) {
+        Py_ssize_t node = nearest;
+        for (;;) {
+            Py_ssize_t up = ancestor->parent[node];
+            if (up < 0 || nonancestors_above(steps, ancestor, below, top, up) >= target) {
+                break;
+            }
+            Py_ssize_t jump = ancestor->jump[node];
+            int skip = nonancestors_above(steps, ancestor, below, top, jump) < target;
+            node = skip ? jump : up;
+        }
+        cut = node;
+    }
+    if (cut < 0) {
+        return steps->good[below - target];
+    }
+    Py_ssize_t rank = target - nonancestors_above(steps, ancestor, below, top, cut);
+    return steps->good[steps->before[cut] - rank];
+}
+
+/* The target-th good node in document order from lo, through the good nodes numbered below hi, or the last one. */
+static Py_ssize_t span_pick(const xp_steps *steps, Py_ssize_t lo, Py_ssize_t hi, Py_ssize_t target, Py_ssize_t *total) {
+    *total = hi - lo;
+    if (target == XP_POSITION_LAST) {
+        target = *total;
+    } else if (target == XP_POSITION_ANY) {
+        target = 1;
+    }
+    if (target < 1 || target > *total) {
+        return -1;
+    }
+    return steps->good[lo + target - 1];
+}
+
+/* Whether the attribute or namespace node of the context passes the predicates ahead of the positional one. */
+static int attribute_passes(const xp_program *prog, const walk_plan *plan, xp_ctx *ctx) {
+    if (!plan->predicated) {
+        return 1;
+    }
+    xp_item item = {ctx->node, ctx->attr};
+    xp_nodeset one = {.items = &item, .len = 1};
+    int rc = apply_predicates(prog, plan->step->first, plan->stop, ctx, &one, XP_HELD_DEPTH + XP_PREDICATE_DEPTH);
+    if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: a predicate error on the owner element raised in steps_for */
+        return rc; /* GCOVR_EXCL_LINE */
+    }
+    return (int)one.len;
+}
+
+/* The node, or the attribute or namespace item, the positional predicate of the path's walked step selects from the
+   context: picked->node is NULL when no node is selected. plan receives the walk the caller reads the rest from. */
+static int index_select(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, Py_ssize_t target, walk_plan *plan,
+                        xp_item *picked, Py_ssize_t *count) {
+    struct th_node *start = NULL;
+    int rc = walk_begin(prog, path_idx, ctx, plan, &start);
+    if (rc < 0) {
+        return rc;
+    }
+    xp_index *index = NULL;
+    rc = index_for(ctx, tree_root(ctx), &index);
+    if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+        return rc; /* GCOVR_EXCL_LINE */
+    }
+    xp_steps *steps = NULL;
+    rc = steps_for(index, plan, (int32_t)(plan->base >> 3), &steps);
+    if (rc < 0) {
+        return rc;
+    }
+    const xn *step = plan->step;
+    Py_ssize_t self = index_number(index, start);
+    Py_ssize_t number = -1;
+    Py_ssize_t total = 0;
+    picked->node = NULL;
+    picked->attr = -1;
+    switch (step->axis) {
+    case AX_ANCESTOR: {
+        rc = chain_ready(index, steps, XP_CHAIN_ANCESTOR);
+        if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return rc; /* GCOVR_EXCL_LINE */
+        }
+        Py_ssize_t from = steps->ancestor.parent[self];
+        if (plan->owned && index_good(steps, self)) {
+            from = self;
+        }
+        number = chain_pick(&steps->ancestor, from, target, &total);
+        break;
+    }
+    case AX_ANCESTOR_OR_SELF: {
+        rc = chain_ready(index, steps, XP_CHAIN_ANCESTOR);
+        if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return rc; /* GCOVR_EXCL_LINE */
+        }
+        Py_ssize_t from = index_good(steps, self) ? self : steps->ancestor.parent[self];
+        if (!plan->owned || step->test != NT_NODE) {
+            number = chain_pick(&steps->ancestor, from, target, &total);
+            break;
+        }
+        /* the attribute or namespace node leads its own list when node() tests it */
+        int own = attribute_passes(prog, plan, ctx);
+        if (own < 0) {  /* GCOVR_EXCL_BR_LINE: a predicate error on the owner element raised in steps_for */
+            return own; /* GCOVR_EXCL_LINE */
+        }
+        Py_ssize_t chain_total = from < 0 ? 0 : steps->ancestor.depth[from] + 1;
+        if (target == XP_POSITION_LAST && chain_total == 0) {
+            if (own) {
+                *picked = (xp_item){ctx->node, ctx->attr};
+            }
+        } else {
+            number = chain_pick(&steps->ancestor, from, target == XP_POSITION_LAST ? target : target - own, &total);
+        }
+        break;
+    }
+    case AX_PRECEDING:
+        rc = chain_ready(index, steps, XP_CHAIN_ANCESTOR);
+        if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return rc; /* GCOVR_EXCL_LINE */
+        }
+        number = preceding_pick(steps, &steps->ancestor, self, target, &total);
+        break;
+    case AX_FOLLOWING: {
+        Py_ssize_t after = plan->owned ? self + 1 : index->end[self] + 1;
+        number = span_pick(steps, steps->before[after], steps->count, target, &total);
+        break;
+    }
+    case AX_DESCENDANT:
+        if (plan->owned) {
+            break;
+        }
+        number = span_pick(steps, steps->before[self + 1], steps->before[index->end[self] + 1], target, &total);
+        break;
+    case AX_DESCENDANT_OR_SELF:
+        if (plan->owned) {
+            /* an attribute or namespace node has no descendants, and node() selects it as its own only */
+            if (step->test != NT_NODE) {
+                break;
+            }
+            int own = attribute_passes(prog, plan, ctx);
+            if (own < 0) {  /* GCOVR_EXCL_BR_LINE: a predicate error on the owner element raised in steps_for */
+                return own; /* GCOVR_EXCL_LINE */
+            }
+            total = own;
+            if (own && (target == 1 || target == XP_POSITION_LAST || target == XP_POSITION_ANY)) {
+                *picked = (xp_item){ctx->node, ctx->attr};
+            }
+            break;
+        }
+        number = span_pick(steps, steps->before[self], steps->before[index->end[self] + 1], target, &total);
+        break;
+    case AX_PRECEDING_SIBLING:
+        if (plan->owned) {
+            break;
+        }
+        rc = chain_ready(index, steps, XP_CHAIN_PREV);
+        if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return rc; /* GCOVR_EXCL_LINE */
+        }
+        number = chain_pick(&steps->prev, steps->prev.parent[self], target, &total);
+        break;
+    default: /* AX_FOLLOWING_SIBLING */
+        if (plan->owned) {
+            break;
+        }
+        rc = chain_ready(index, steps, XP_CHAIN_NEXT);
+        if (rc < 0) {  /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return rc; /* GCOVR_EXCL_LINE */
+        }
+        number = chain_pick(&steps->next, steps->next.parent[self], target, &total);
+        break;
+    }
+    if (number >= 0) {
+        picked->node = index->nodes[number];
+    }
+    *count = total;
+    return 0;
+}
+
+/* The exists result of an index-answered path, as walk_exists gives it. */
+static int index_exists(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, Py_ssize_t target, xp_nodeset *out) {
+    walk_plan plan;
+    xp_item picked;
+    Py_ssize_t total = 0;
+    int rc = index_select(prog, path_idx, ctx, target, &plan, &picked, &total);
+    if (rc < 0 || picked.node == NULL) {
+        return rc;
+    }
+    if (plan.rest < 0) {
+        if (ns_push(out, picked.node, picked.attr) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                                    /* GCOVR_EXCL_LINE */
+        }
+        return 0;
+    }
+    return walk_rest_item(&plan, picked, out);
+}
+
+/* The memo's answer for a path that walk_applies accepts, as eval_path's exists result: at least one node when the
+   path selects any. */
+static int walk_exists(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_nodeset *out) {
+    walk_plan plan;
+    struct th_node *start = NULL;
+    int rc = walk_begin(prog, path_idx, ctx, &plan, &start);
+    if (rc < 0) {
+        return rc;
+    }
+    struct th_node *nearest = NULL;
+    rc = walk_search(&plan, start, &nearest);
+    if (rc < 0 || nearest == NULL) {
+        return rc;
+    }
+    if (plan.rest < 0) {
+        if (ns_push(out, nearest, -1) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
+            return -1;                       /* GCOVR_EXCL_LINE */
+        }
+        return 0;
+    }
+    return walk_rest_run(&plan, nearest, out);
+}
+
+int xp_count_walk(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, Py_ssize_t *count) {
+    if (prog->nodes[path_idx].first < 0 || prog->nodes[prog->nodes[path_idx].first].next >= 0) {
+        return 0;
+    }
+    Py_ssize_t target = 0;
+    int route = path_route(prog, path_idx, ctx, &target);
+    if (route == XP_ROUTE_INDEX) {
+        walk_plan selected;
+        xp_item picked;
+        Py_ssize_t total = 0;
+        int index_rc = index_select(prog, path_idx, ctx, target, &selected, &picked, &total);
+        if (index_rc < 0) {
+            return index_rc;
+        }
+        *count = target == XP_POSITION_ANY ? total : picked.node != NULL;
+        return 1;
+    }
+    if (route != XP_ROUTE_WALK) {
+        return 0;
+    }
+    walk_plan plan;
+    struct th_node *start = NULL;
+    int rc = walk_begin(prog, path_idx, ctx, &plan, &start);
+    if (rc < 0) {
+        return rc;
+    }
+    struct th_node *nearest = NULL;
+    rc = walk_axis(&plan, start, &nearest, count);
+    if (rc < 0) {
+        return rc;
+    }
+    if (plan.stop >= 0 && *count > 1) {
+        *count = 1;
+    }
+    return 1;
+}
+
 /* exists is set when the caller only asks whether the path selects a node: out then holds at least one of the nodes
    the path selects when there are any, and not necessarily all of them. */
+/* Whether the first step of a path is on an axis path_route can answer. Checked first, so an existence test on any
+   other axis, the attribute axis most of all, costs one comparison. */
+static int route_axis(const xp_program *prog, int32_t path_idx) {
+    const xn *root = &prog->nodes[path_idx];
+    if (root->first < 0) {
+        return 0;
+    }
+    switch (prog->nodes[root->first].axis) {
+    case AX_ANCESTOR:
+    case AX_ANCESTOR_OR_SELF:
+    case AX_PRECEDING:
+    case AX_FOLLOWING:
+    case AX_PRECEDING_SIBLING:
+    case AX_FOLLOWING_SIBLING:
+    case AX_DESCENDANT:
+    case AX_DESCENDANT_OR_SELF:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int eval_path(const xp_program *prog, int32_t path_idx, xp_ctx *ctx, xp_nodeset *out, int exists) {
+    if (exists && route_axis(prog, path_idx)) {
+        Py_ssize_t target = 0;
+        int route = path_route(prog, path_idx, ctx, &target);
+        if (route == XP_ROUTE_WALK) {
+            return walk_exists(prog, path_idx, ctx, out);
+        }
+        if (route == XP_ROUTE_INDEX) {
+            return index_exists(prog, path_idx, ctx, target, out);
+        }
+    }
     xp_nodeset current = {0};
     xp_nodeset following = {0};
     return eval_path_inner(prog, path_idx, ctx, out, &current, &following, exists);
@@ -4708,7 +5970,9 @@ static TH_NOINLINE void xp_caches_free(xp_caches *caches) {
     xr_cache_clear(&caches->regex);
     PyMem_Free(caches->positions.entries);
     PyMem_Free(caches->roots.entries);
+    PyMem_Free(caches->walks.entries);
     xp_lang_memo_free(caches->langs);
+    xp_index_free(caches->index);
     PyMem_Free(caches);
 }
 

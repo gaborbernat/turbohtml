@@ -735,11 +735,11 @@ static inline PyObject *split_token_list(const Py_UCS4 *value, Py_ssize_t value_
 /* Build the Element.attrs mapping: token-list attributes (class and friends)
    become a list[str], everything else is a str; a valueless or empty attribute is
    the empty string (or the empty list for a token-list attribute). */
-/* One attribute's name as a str. */
+/* One attribute's name as a str. Surrogatepass reads back a lone surrogate the parser or a DOM edit kept in a name. */
 static inline PyObject *attr_name_obj(th_tree *tree, const th_node_attr *attr) {
     Py_ssize_t name_len;
     const char *bytes = th_attr_name(tree, attr->name_atom, &name_len);
-    return PyUnicode_DecodeUTF8(bytes, name_len, "strict");
+    return PyUnicode_DecodeUTF8(bytes, name_len, "surrogatepass");
 }
 
 /* One attribute's value as the public object: a list[str] for a token-list attribute
@@ -932,9 +932,10 @@ char *attr_key_utf8(th_tree *tree, PyObject *key, Py_ssize_t *out_len);
    that keeps content from writing its own ISO-2022 shift codes. Defined in node.c beside encode(); elementtree.c's
    tostring() encodes through it too. */
 PyObject *markup_encode(PyObject *text, const char *encoding, int charrefs);
+int declaration_reads_back(PyObject *text, PyObject *bytes, const char *encoding, const char *charset);
 
 /* The name the codec registry gives encoding, as a new reference: None when its CodecInfo carries no name, or NULL with
-   the lookup's exception set for an unknown codec. Defined in node.c beside the ISO-2022 check. */
+   the lookup's exception set for an unknown codec. Defined in node.c beside markup_encode. */
 PyObject *codec_registry_name(const char *encoding);
 
 /* The WHATWG name a meta_charset declaration writes for an encode() codec, or NULL with no exception set when no label

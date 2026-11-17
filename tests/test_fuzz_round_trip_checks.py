@@ -889,6 +889,16 @@ def test_generation_changed_decoder_text(data: bytes) -> None:
         encoding_observation(data, decode=lambda _data, _codec: "<p>wrong</p>")
 
 
+def test_generation_reference_text_mismatch(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "fuzz.generation_targets.parse_reference",
+        autospec=True,
+        return_value=html5lib.parse("<p>wrong</p>", namespaceHTMLElements=False),
+    )
+    with pytest.raises(AssertionError, match="Encoded parser text differs"):
+        encoding_observation(b"<p>kept</p>")
+
+
 @pytest.mark.parametrize(
     ("markup", "expected"),
     [
@@ -906,23 +916,23 @@ def test_generation_foreign_unmatched_p_null(markup: str, expected: str) -> None
     ("nesting", "oracle_calls"),
     [
         pytest.param(500, 1, id="reference-at-limit"),
-        pytest.param(501, 0, id="reference-past-limit"),
+        pytest.param(501, 1, id="reference-past-limit"),
         pytest.param(2501, 0, id="parser-past-limit"),
     ],
 )
-def test_encoding_oracle_skips_markup_past_the_nesting_limit(
+def test_encoding_oracle_compares_deep_markup_up_to_the_nesting_limit(
     nesting: int, oracle_calls: int, mocker: MockerFixture
 ) -> None:
-    parse_reference: Final = mocker.spy(html5lib, "parse")
+    parse_reference: Final = mocker.spy(html5lib.HTMLParser, "parse")
     assert encoding_observation((f"{'<div>' * nesting}kept").encode()) == "kept"
     assert parse_reference.call_count == oracle_calls
 
 
-def test_encoding_oracle_keeps_parser_text_at_the_tree_depth_cap(mocker: MockerFixture) -> None:
-    parse_reference: Final = mocker.spy(html5lib, "parse")
+def test_encoding_oracle_matches_the_reference_past_the_tree_depth_cap(mocker: MockerFixture) -> None:
+    parse_reference: Final = mocker.spy(html5lib.HTMLParser, "parse")
     data: Final = (f">{'<div>' * 509}\x01\x00<table><tr><ud>a<=d>c<td>d").encode()
-    assert encoding_observation(data) == ">\x01da<=d>c"
-    assert parse_reference.call_count == 0
+    assert encoding_observation(data) == ">\x01a<=d>cd"
+    assert parse_reference.call_count == 1
 
 
 @pytest.mark.parametrize(
@@ -2297,6 +2307,34 @@ def test_atheris_driver_connects_exception_boundary(mocker: MockerFixture) -> No
         [1],
         ["driver", "-runs=2"],
         {"custom_mutator": None},
+    )
+
+
+@pytest.mark.parametrize(
+    ("sanitizer", "instrumented"),
+    [
+        pytest.param("address", 1, id="address"),
+        pytest.param("undefined", 1, id="undefined"),
+        pytest.param("coverage", 0, id="coverage"),
+    ],
+)
+def test_atheris_driver_instruments_all_except_in_coverage_runs(
+    mocker: MockerFixture, sanitizer: str, instrumented: int
+) -> None:
+    mocker.patch.dict(os.environ, {"SANITIZER": sanitizer})
+    runtime = mocker.MagicMock(  # simplint: ignore[mock-without-spec]  # optional Atheris has no importable API here
+        spec=["Setup", "Fuzz", "instrument_func", "instrument_all"]
+    )
+    runtime.instrument_func.side_effect = lambda callback: callback
+    mocker.patch("fuzz.atheris_driver.import_module", autospec=True, return_value=runtime)
+    mocker.patch("fuzz.atheris_driver.rejection_hook", autospec=True, return_value=partial(lambda _: None, 1))
+    mocker.patch("fuzz.atheris_driver.failure_hook", autospec=True, return_value=lambda _position: (0, False))
+    target = Target(name="cli", callback=lambda _data: None, exports=("turbohtml.__main__.main",))
+    fuzz([target], ["turbohtml.__main__"], "cli", ["driver"])
+    assert (runtime.instrument_all.call_count, runtime.Setup.call_count, runtime.Fuzz.call_count) == (
+        instrumented,
+        1,
+        1,
     )
 
 
@@ -4072,6 +4110,13 @@ def test_xpath_anchored_compares_values_and_types(anchored: ModuleType) -> None:
         (("boolean", True), ("boolean", True)),
         (("string", "alpha"), ("string", "alpha")),
     ]
+
+
+@pytest.mark.oracle
+@pytest.mark.parametrize("expression", ["count(self::*)", "count(ancestor-or-self::*)", "count(..)", "name(self::*)"])
+def test_xpath_anchored_engines_start_at_the_same_node(anchored: ModuleType, expression: str) -> None:
+    ours, reference = anchored.contexts(_XML)
+    assert ours.xpath(expression) == reference.xpath(expression)
 
 
 @pytest.mark.oracle
