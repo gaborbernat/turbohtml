@@ -1177,10 +1177,71 @@ static Py_ssize_t css_read_until(cursor *cur, const char *stops) {
     return cur->index;
 }
 
-/* Find the index of the ')' matching an opening '(' that sits at open_paren, or end when the arguments run to it. Kept
-   out of line: inlined into css_emit_function's nested-call path it runs slower than the call it saves. */
-CSS_NOINLINE static Py_ssize_t css_match_paren(token_vec *vec, Py_ssize_t open_paren, Py_ssize_t end) {
+/* Pair the brackets of the tokens [lo, hi) for css_match_paren. An open bracket holds the index of the bracket below it
+   in closers until it closes, when it takes its closer's index, and an open bracket left at hi takes hi. A closer that
+   does not match the top bracket is ignored, as css_scan_stacked ignores it. The walk starts at lo, an open paren, and
+   a bracket's pair depends only on the tokens after it, so these are the pairs a walk from the start of the stylesheet
+   finds. Returns 0 when the table cannot grow, and then leaves the table as it was. */
+CSS_NOINLINE static int css_pair_brackets(token_vec *vec, Py_ssize_t lo, Py_ssize_t hi) {
+    if (vec->closers_cap < hi - lo) {
+        Py_ssize_t *grown = css_realloc(vec->closers, (size_t)(hi - lo) * sizeof(Py_ssize_t));
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+            *vec->oom = 1;   /* GCOVR_EXCL_LINE: allocation-failure path */
+            return 0;        /* GCOVR_EXCL_LINE: allocation-failure path */
+        }
+        vec->closers = grown;
+        vec->closers_cap = hi - lo;
+    }
+    Py_ssize_t open = -1;
+    for (Py_ssize_t index = lo; index < hi; index++) {
+        TH_WORK_STEP();
+        if (vec->items[index].kind != CSS_DELIM) {
+            continue;
+        }
+        css_char delim = vec->items[index].delim;
+        if (delim == '(' || delim == '[' || delim == '{') {
+            vec->closers[index - lo] = open;
+            open = index;
+        } else if (open >= 0 && /* GCOVR_EXCL_BR_LINE: the opener at lo closes at hi - 1 */
+                   (delim == ')' || delim == ']' || delim == '}') &&
+                   vec->items[open].delim == (delim == ')' ? '(' : delim - 2)) {
+            Py_ssize_t below = vec->closers[open - lo];
+            vec->closers[open - lo] = index;
+            open = below;
+        }
+    }
+    while (open >= 0) {
+        Py_ssize_t below = vec->closers[open - lo];
+        vec->closers[open - lo] = hi;
+        open = below;
+    }
+    vec->pair_lo = lo;
+    vec->pair_hi = hi;
+    return 1;
+}
+
+/* A call whose arguments nest a call and span more tokens than this pairs its brackets, so the nested calls read their
+   closers rather than scanning again. A shorter span is cheaper to scan than to pair. */
+#define CSS_PAIR_MIN_SPAN 32
+
+/* The closer of the call at open_paren, whose scan from open_paren found closer, once its arguments are known to nest a
+   call: the span pairs once, so each call inside it reads its pair instead of scanning again. A pair never runs past
+   end, as the span stops at this call's own closer. */
+CSS_NOINLINE static Py_ssize_t css_pair_span(token_vec *vec, Py_ssize_t open_paren, Py_ssize_t end, Py_ssize_t closer) {
+    Py_ssize_t hi = closer < end ? closer + 1 : end;
+    int paired = css_pair_brackets(vec, open_paren, hi);
+    if (!paired) {     /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return closer; /* GCOVR_EXCL_LINE: allocation-failure path */
+    }
+    return vec->closers[0] < end ? vec->closers[0] : end;
+}
+
+/* Find the index of the ')' matching the '(' at open_paren, or end when the arguments run to it, by counting the
+   parentheses up to it. Kept out of line, as the count is not on the path of a call read from a pair. nested is set
+   when a `(` opens inside the arguments. */
+CSS_NOINLINE static Py_ssize_t css_scan_paren(token_vec *vec, Py_ssize_t open_paren, Py_ssize_t end, int *nested) {
     Py_ssize_t parens_open = 0;
+    Py_ssize_t closer = end;
     for (Py_ssize_t index = open_paren + 1; index < end; index++) {
         TH_WORK_STEP();
         if (vec->items[index].kind != CSS_DELIM) {
@@ -1189,13 +1250,38 @@ CSS_NOINLINE static Py_ssize_t css_match_paren(token_vec *vec, Py_ssize_t open_p
         css_char delim = vec->items[index].delim;
         if (delim == '(') {
             parens_open++;
+            *nested = 1;
         } else if (delim == ')' && parens_open-- == 0) {
-            return index;
+            closer = index;
+            break;
         } else if (delim == '[' || delim == '{') {
-            return css_scan_stacked(vec, index, end, parens_open, ")");
+            closer = css_scan_stacked(vec, index, end, parens_open, ")");
+            break;
         }
     }
-    return end;
+    return closer;
+}
+
+/* css_match_paren for a call the pairs do not cover: count its parentheses, and pair its span when it nests a call. */
+CSS_NOINLINE static Py_ssize_t css_match_scan(token_vec *vec, Py_ssize_t open_paren, Py_ssize_t end) {
+    int nested = 0;
+    Py_ssize_t closer = css_scan_paren(vec, open_paren, end, &nested);
+    if (nested && closer - open_paren > CSS_PAIR_MIN_SPAN) {
+        return css_pair_span(vec, open_paren, end, closer);
+    }
+    return closer;
+}
+
+/* Find the index of the ')' matching the '(' at open_paren, or end when the arguments run to it. A call inside a span
+   that was paired reads its closer from the pairs; any other call counts its parentheses. */
+static inline Py_ssize_t css_match_paren(token_vec *vec, Py_ssize_t open_paren, Py_ssize_t end) {
+    /* GCOVR_EXCL_BR_START: every caller passes an open paren before end, which keeps the table index in range */
+    if (open_paren >= vec->pair_lo && open_paren < end && end <= vec->pair_hi) {
+        /* GCOVR_EXCL_BR_STOP */
+        Py_ssize_t closer = vec->closers[open_paren - vec->pair_lo];
+        return closer < end ? closer : end;
+    }
+    return css_match_scan(vec, open_paren, end);
 }
 
 /* css_match_paren for every block of the tokens [start, end) in one pass: closers[opener - start] is the index of the

@@ -229,6 +229,10 @@ typedef struct {
     css_bang *bangs;
     Py_ssize_t bang_len;
     Py_ssize_t bang_cap;
+    Py_ssize_t *closers; /* css_match_paren's pairs for the brackets of [pair_lo, pair_hi), built when a call asks */
+    Py_ssize_t closers_cap;
+    Py_ssize_t pair_lo;
+    Py_ssize_t pair_hi; /* 0 until the first pairing */
 } token_vec;
 
 /* The text every bang comment token points at. An empty comment spells nothing, so the placeholder keeps the token
@@ -280,6 +284,9 @@ static void css_put_bang(css_buf *out, token_vec *vec, Py_ssize_t index) {
 static void css_token_vec_free(token_vec *vec) {
     css_free(vec->items);
     css_free(vec->bangs);
+    if (vec->closers != NULL) {
+        css_free(vec->closers);
+    }
 }
 
 /* Untrusted nesting drives the parsers into C recursion. 100 sits between rust-cssparser's 75 and WebKit's 128; the

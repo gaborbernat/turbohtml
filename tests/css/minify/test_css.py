@@ -6409,6 +6409,81 @@ def test_filter_function_ends_at_its_own_closer(source: str, expected: str) -> N
 
 
 @pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            ("a{margin:f(g(1px) {x} 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px)}"),
+            ("a{margin:f(g(1px) {x} 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px)}"),
+            id="nested-call-with-brace",
+        ),
+        pytest.param(
+            ("a{margin:f(g(1px) [x] 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px)}"),
+            ("a{margin:f(g(1px) [x] 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px)}"),
+            id="nested-call-with-bracket",
+        ),
+        pytest.param(
+            ("a{margin:f(g(1px) ]) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px)}"),
+            ("a{margin:f(g(1px) ])1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px)}"),
+            id="stray-closer",
+        ),
+        pytest.param(
+            (
+                "a{margin:f(g(1px) [) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1"
+                "px 1px 1px 1px 1px 1px 1px 1px ])}"
+            ),
+            (
+                "a{margin:f(g(1px) [) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1"
+                "px 1px 1px 1px 1px 1px 1px 1px ])}"
+            ),
+            id="mismatched-closer",
+        ),
+        pytest.param(
+            ("a{margin:f(g(1px) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px}"),
+            ("a{margin:f(g(1px) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px})}"),
+            id="unclosed-nested",
+        ),
+        pytest.param(
+            (
+                "a{margin:f(g(1px) h(2px) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1"
+                "px 1px 1px 1px 1px 1px 1px 1px 1px"
+            ),
+            (
+                "a{margin:f(g(1px) h(2px) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1"
+                "px 1px 1px 1px 1px 1px 1px 1px 1px)}"
+            ),
+            id="unclosed-outer",
+        ),
+        pytest.param(
+            (
+                "a{margin:f(g(1px) h(2px) i(3px) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1p"
+                "x 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px))}"
+            ),
+            (
+                "a{margin:f(g(1px) h(2px) i(3px) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1p"
+                "x 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px))}"
+            ),
+            id="nested-closed-late",
+        ),
+        pytest.param(
+            (
+                "a{margin:f(g(1px) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px "
+                "1px 1px 1px 1px 1px 1px 1px) f(h(2px) 1px 1px 1px 1px 1px 1px 1px 1px "
+                "1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px))}"
+            ),
+            (
+                "a{margin:f(g(1px) 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px "
+                "1px 1px 1px 1px 1px 1px 1px)f(h(2px) 1px 1px 1px 1px 1px 1px 1px 1px 1"
+                "px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px 1px))}"
+            ),
+            id="sibling-long-calls",
+        ),
+    ],
+)
+def test_minify_css_call_spans_pair_their_brackets(source: str, expected: str) -> None:
+    assert minify_css(source) == expected
+
+
+@pytest.mark.parametrize(
     ("nested", "recovery"),
     [
         pytest.param(f"{'min(' * 200}{')' * 200}", "", id="closed"),
