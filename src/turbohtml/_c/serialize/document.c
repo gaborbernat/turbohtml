@@ -1324,7 +1324,44 @@ Py_UCS4 *th_node_child_text(th_tree *tree, th_node *node, Py_ssize_t *out_len) {
     return sbuf_finish(&out, out_len);
 }
 
-PyObject *th_node_text_string(th_tree *tree, th_node *root) {
+static inline int text_carrier(const th_node *child) {
+    return child->type == TH_NODE_TEXT ? child->text_len != 0 : child->first_child != NULL;
+}
+
+/* The span holding all of node's text, or NULL. A child that holds no text (a childless element, a comment, an empty
+   Text node) is skipped, and the walk follows the one child that does. Two text-carrying children at one level end it
+   at once, so a multi-node page stops after its first level. */
+static th_node *lone_text_span(th_node *node) {
+    while (node->type != TH_NODE_TEXT) {
+        th_node *first = node->first_child;
+        if (first == NULL) {
+            return NULL;
+        }
+        th_node *last = node->last_child;
+        if (first != last && text_carrier(first) && text_carrier(last)) {
+            return NULL;
+        }
+        th_node *carrier = NULL;
+        for (th_node *child = first; child != NULL; child = child->next_sibling) {
+            if (!text_carrier(child)) {
+                continue;
+            }
+            if (carrier != NULL) {
+                return NULL;
+            }
+            carrier = child;
+        }
+        if (carrier == NULL) {
+            return NULL;
+        }
+        node = carrier;
+    }
+    return text_is_span(node) ? node : NULL;
+}
+
+/* The general walk, upstream's body unchanged. Kept out of line so th_node_text_string's eligibility check does not
+   change how this loop compiles. */
+static TH_NOINLINE PyObject *text_string_walk(th_tree *tree, th_node *root) {
     sbuf snapshot = {NULL, 0, 0, 0, 0, NULL};
     Py_UCS4 bits = 0;
     th_node *first = root->type == TH_NODE_TEXT ? root : root->first_child;
@@ -1375,6 +1412,15 @@ PyObject *th_node_text_string(th_tree *tree, th_node *root) {
     }
     PyMem_Free(snapshot.data);
     return result;
+}
+
+PyObject *th_node_text_string(th_tree *tree, th_node *root) {
+    th_node *lone = lone_text_span(root);
+    if (lone != NULL) {
+        const uint8_t *data = (const uint8_t *)tree->data + text_span_offset(lone) * tree->kind;
+        return th_str_from_kind(tree->kind, data, lone->text_len);
+    }
+    return text_string_walk(tree, root);
 }
 
 /* Copy every descendant Text node's code points of node into buf at pos, realizing

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 from concurrent.futures import ThreadPoolExecutor
+from itertools import cycle, islice
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
@@ -1578,3 +1579,126 @@ def test_iter_elements_rejects_non_iterable_tags() -> None:
 def test_iter_elements_rejects_extra_arguments() -> None:
     with pytest.raises(TypeError):
         cast("Callable[..., object]", Element("main").iter_elements)(None, None, None)
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected"),
+    [
+        pytest.param("<p>plain ascii</p>", "plain ascii", id="ascii"),
+        pytest.param("<p>café au lait</p>", "café au lait", id="latin1"),
+        pytest.param("<p>雪が降る</p>", "雪が降る", id="bmp"),
+        pytest.param("<p>wave 😀 done</p>", "wave 😀 done", id="astral"),
+        pytest.param("<p>a\r\nb</p>", "a\nb", id="crlf-normalized"),
+        pytest.param("<p></p>", "", id="empty"),
+    ],
+)
+def test_text_of_one_span_node(markup: str, expected: str) -> None:
+    paragraph: Final = _paragraph(markup)
+    assert (paragraph.text, paragraph.text) == (expected, expected)
+
+
+def _paragraph(markup: str) -> Element:
+    paragraph: Final = parse(markup).find("p")
+    assert paragraph is not None
+    return paragraph
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected"),
+    [
+        pytest.param("<p>a</p><p>雪</p>", "a", id="bmp-neighbour"),
+        pytest.param("<p>é</p><p>😀</p>", "é", id="astral-neighbour"),
+        pytest.param("<p>a</p><p>é</p><p>😀</p>", "a", id="latin1-and-astral-neighbours"),
+        pytest.param("<p>雪</p><p>😀</p>", "雪", id="astral-neighbour-bmp"),
+    ],
+)
+def test_narrow_span_next_to_wide_input_keeps_its_narrow_kind(markup: str, expected: str) -> None:
+    assert _paragraph(markup).text == expected
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected"),
+    [
+        pytest.param("<p>a<b>x</b>é</p>", "axé", id="latin1-spans"),
+        pytest.param("<p>雪<b>x</b>é</p>", "雪xé", id="bmp-first-span"),
+        pytest.param("<p>a<b>😀</b>é</p>", "a😀é", id="astral-middle-span"),
+    ],
+)
+def test_text_joins_unmodified_span_nodes(markup: str, expected: str) -> None:
+    assert _paragraph(markup).text == expected
+
+
+@pytest.mark.parametrize(
+    ("markup", "replacement", "expected"),
+    [
+        pytest.param("<p>a<b>x</b>é</p>", "a", "axé", id="ascii-copy-latin1-input"),
+        pytest.param("<p>a<b>x</b>é</p>", "雪", "雪xé", id="bmp-copy-latin1-input"),
+        pytest.param("<p>a<b>x</b>é</p>", "😀", "😀xé", id="astral-copy-latin1-input"),
+        pytest.param("<p>雪<b>x</b>é</p>", "a", "axé", id="ascii-copy-bmp-input"),
+        pytest.param("<p>雪<b>x</b>é</p>", "😀", "😀xé", id="astral-copy-bmp-input"),
+    ],
+)
+def test_text_mixes_copied_and_span_nodes(markup: str, replacement: str, expected: str) -> None:
+    paragraph: Final = _paragraph(markup)
+    first: Final = paragraph.children[0]
+    assert isinstance(first, Text)
+    first.data = replacement
+    assert paragraph.text == expected
+
+
+def test_text_after_mutating_a_span_reads_the_new_data() -> None:
+    paragraph: Final = _paragraph("<p>café</p>")
+    text: Final = paragraph.children[0]
+    assert isinstance(text, Text)
+    assert (paragraph.text, paragraph.text) == ("café", "café")
+    text.data = "雪"
+    assert (paragraph.text, text.text) == ("雪", "雪")
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected"),
+    [
+        pytest.param("<p>café</p>", "café", id="latin1"),
+        pytest.param("<p>雪</p>", "雪", id="bmp"),
+    ],
+)
+def test_text_node_text_reads_its_span(markup: str, expected: str) -> None:
+    assert _paragraph(markup).children[0].text == expected
+
+
+def test_text_of_element_skips_empty_copied_nodes() -> None:
+    paragraph: Final = Element("p")
+    paragraph.extend(Text(data) for data in ("", "é", ""))
+    assert paragraph.text == "é"
+
+
+@pytest.mark.parametrize("count", [pytest.param(2, id="few"), pytest.param(200, id="many-nodes")])
+def test_text_over_many_nodes_keeps_document_order(count: int) -> None:
+    paragraph: Final = _paragraph(f"<p>{'<i>a</i><b>x</b><u>é</u>' * count}</p>")
+    leading: Final = [node for node in paragraph.descendants if isinstance(node, Text) and node.data == "a"]
+    for text in leading[::2]:
+        text.data = "雪"
+    leads: Final = islice(cycle(("雪", "a")), count)
+    assert paragraph.text == "".join(f"{lead}xé" for lead in leads)
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected"),
+    [
+        pytest.param("<p><br>é</p>", "é", id="childless-before"),
+        pytest.param("<p>é<img></p>", "é", id="childless-after"),
+        pytest.param("<p><!--c-->é</p>", "é", id="comment-before"),
+        pytest.param("<p><b></b>é</p>", "é", id="empty-element-before"),
+        pytest.param("<p><b><i>雪</i></b></p>", "雪", id="chain-through-elements"),
+        pytest.param("<p><b><i></i></b></p>", "", id="chain-without-text"),
+        pytest.param("<p><br>é<i>x</i></p>", "éx", id="two-carriers-after-empty-first"),
+    ],
+)
+def test_text_past_text_free_siblings(markup: str, expected: str) -> None:
+    assert _paragraph(markup).text == expected
+
+
+def test_empty_text_sibling_is_skipped() -> None:
+    paragraph: Final = _paragraph("<p>é</p>")
+    paragraph.extend([Text("")])
+    assert paragraph.text == "é"
