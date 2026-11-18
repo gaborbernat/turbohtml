@@ -1680,13 +1680,17 @@ static void th_detect_candidates_feed(th_detect_stream *stream, const unsigned c
     }
 }
 
-/* The offset of the first non-ASCII or ESC byte, or len. chardetng's feed starts the candidates two bytes before it,
-   so the single-byte and CJK candidates never score the ASCII before that point; the stream and the one-shot path
-   both match that. The ISO-2022-JP scan still sees the whole prefix. */
+/* The offset of the first non-ASCII or ESC byte, or len. chardetng's feed starts every candidate, the ISO-2022-JP one
+   included, two bytes before it, so the ASCII before that point is never scored; the stream and the one-shot path
+   both match that. */
 static Py_ssize_t th_detect_first_event(const unsigned char *buf, Py_ssize_t len) {
     Py_ssize_t ascii = th_decode_ascii_run(buf, len);
     const unsigned char *escape = memchr(buf, 0x1B, (size_t)ascii);
     return escape == NULL ? ascii : escape - buf;
+}
+
+static Py_ssize_t th_detect_window_start(Py_ssize_t first) {
+    return first < 2 ? 0 : first - 2;
 }
 
 /* Keep the last two bytes of an all-ASCII chunk, the context a first event at offset 0 or 1 of a later chunk reads. */
@@ -1701,11 +1705,15 @@ static void th_detect_stream_keep_tail(th_detect_stream *stream, const unsigned 
     }
 }
 
+static void th_detect_scored_feed(th_detect_stream *stream, const unsigned char *buf, Py_ssize_t len, int final) {
+    th_jp_scan_feed(&stream->jp, buf, len, final);
+    th_detect_candidates_feed(stream, buf, len, final);
+}
+
 static void th_detect_stream_feed(th_detect_stream *stream, const unsigned char *buf, Py_ssize_t len, int final) {
     th_utf8_scan_feed(&stream->utf8, buf, len);
-    th_jp_scan_feed(&stream->jp, buf, len, final);
     if (stream->started) {
-        th_detect_candidates_feed(stream, buf, len, final);
+        th_detect_scored_feed(stream, buf, len, final);
         return;
     }
     Py_ssize_t first = th_detect_first_event(buf, len);
@@ -1715,14 +1723,14 @@ static void th_detect_stream_feed(th_detect_stream *stream, const unsigned char 
     }
     stream->started = 1;
     if (first >= 2) {
-        th_detect_candidates_feed(stream, buf + first - 2, len - first + 2, final);
+        th_detect_scored_feed(stream, buf + first - 2, len - first + 2, final);
         return;
     }
     Py_ssize_t context = 2 - first < stream->tail_len ? 2 - first : stream->tail_len;
     if (context > 0) {
-        th_detect_candidates_feed(stream, stream->tail + 2 - context, context, 0);
+        th_detect_scored_feed(stream, stream->tail + 2 - context, context, 0);
     }
-    th_detect_candidates_feed(stream, buf, len, final);
+    th_detect_scored_feed(stream, buf, len, final);
 }
 
 /* The scored answer: the surviving CJK and single-byte candidates compete in chardetng's
@@ -1809,7 +1817,9 @@ static const th_encoding_entry *th_encoding_detect(const unsigned char *buf, Py_
     int has_non_ascii;
     int is_utf8 = th_detect_is_utf8(buf, len, &has_non_ascii);
     if (!has_non_ascii) {
-        if (th_iso2022jp_alive(buf, len)) {
+        const unsigned char *escape = memchr(buf, 0x1B, (size_t)len);
+        Py_ssize_t start = escape == NULL ? len : th_detect_window_start(escape - buf);
+        if (th_iso2022jp_alive(buf + start, len - start)) {
             scores->structural = 1;
             return th_encoding_lookup("iso-2022-jp", 11);
         }
@@ -1821,8 +1831,7 @@ static const th_encoding_entry *th_encoding_detect(const unsigned char *buf, Py_
     }
     th_detect_stream stream;
     th_detect_stream_init(&stream);
-    Py_ssize_t first = th_detect_first_event(buf, len);
-    Py_ssize_t start = first < 2 ? 0 : first - 2;
+    Py_ssize_t start = th_detect_window_start(th_detect_first_event(buf, len));
     th_detect_candidates_feed(&stream, buf + start, len - start, 1);
     return th_detect_pick_winner(&stream, tld, scores);
 }

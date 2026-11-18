@@ -1231,3 +1231,40 @@ def test_ascii_prefix_streamed_matches_chardetng(raw: bytes, size: int) -> None:
     for start in range(0, len(raw), size):
         detector.feed(raw[start : start + size])
     assert detector.close().encoding == "windows-1252"
+
+
+# chardetng feeds its ISO-2022-JP candidate from two bytes before the escape, so a shift code further back never
+# reaches it. Scanning the whole prefix ruled these streams out and answered windows-1252.
+_BEFORE_WINDOW: Final[tuple[bytes, ...]] = (b"\x0eab\x1b(B", b"\x0e.VDM?!\x1b(JeHr")
+# a shift code inside that window does reach the candidate, and the ASCII state rejects it. chardetng answers UTF-8
+# for these pure-ASCII streams, the policy turbohtml documents, so the pin is the ISO-2022-JP exclusion alone.
+_INSIDE_WINDOW: Final[tuple[bytes, ...]] = (b"\x0e\x1b(B", b"abc\x0e\x1b(B")
+_ISO_CHUNK_SIZES: Final[tuple[int, ...]] = (1, 2, 3, 16)
+
+
+@pytest.mark.parametrize("raw", [pytest.param(raw, id=f"before-{index}") for index, raw in enumerate(_BEFORE_WINDOW)])
+def test_shift_code_before_the_window_keeps_iso_2022_jp(raw: bytes) -> None:
+    assert detect(raw).encoding == "ISO-2022-JP"
+
+
+@pytest.mark.parametrize("size", [pytest.param(size, id=f"chunk-{size}") for size in _ISO_CHUNK_SIZES])
+@pytest.mark.parametrize("raw", [pytest.param(raw, id=f"before-{index}") for index, raw in enumerate(_BEFORE_WINDOW)])
+def test_shift_code_before_the_window_keeps_iso_2022_jp_streamed(raw: bytes, size: int) -> None:
+    detector = EncodingDetector()
+    for start in range(0, len(raw), size):
+        detector.feed(raw[start : start + size])
+    assert detector.close().encoding == "ISO-2022-JP"
+
+
+@pytest.mark.parametrize("raw", [pytest.param(raw, id=f"inside-{index}") for index, raw in enumerate(_INSIDE_WINDOW)])
+def test_shift_code_inside_the_window_rules_out_iso_2022_jp(raw: bytes) -> None:
+    assert detect(raw).encoding != "ISO-2022-JP"
+
+
+@pytest.mark.parametrize("size", [pytest.param(size, id=f"chunk-{size}") for size in _ISO_CHUNK_SIZES])
+@pytest.mark.parametrize("raw", [pytest.param(raw, id=f"inside-{index}") for index, raw in enumerate(_INSIDE_WINDOW)])
+def test_shift_code_inside_the_window_rules_out_iso_2022_jp_streamed(raw: bytes, size: int) -> None:
+    detector = EncodingDetector()
+    for start in range(0, len(raw), size):
+        detector.feed(raw[start : start + size])
+    assert detector.close().encoding != "ISO-2022-JP"
