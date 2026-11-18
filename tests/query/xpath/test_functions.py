@@ -1576,6 +1576,8 @@ def test_concat_constructed_text_child(text: str) -> None:
         pytest.param("<root><i><!--ignored-->é</i></root>", "str:concat(//i)", "é", id="comment-before-text"),
         pytest.param("<root><i>é<!--ignored--></i></root>", "str:concat(//i)", "é", id="comment-after-text"),
         pytest.param("<root><i/><i/></root>", "str:concat(//i)", "", id="empty-elements"),
+        pytest.param("<root><?p d?><i/></root>", "str:concat(//processing-instruction())", "d", id="pi-data"),
+        pytest.param("<root><i>x<![CDATA[y]]>z</i></root>", "str:concat(//i/text())", "xyz", id="cdata-run"),
         pytest.param("<root/>", "str:concat(//absent)", "", id="empty-set"),
         pytest.param(
             "<root/>", "str:concat(/*/namespace::xml)", "http://www.w3.org/XML/1998/namespace", id="xml-namespace"
@@ -1584,6 +1586,38 @@ def test_concat_constructed_text_child(text: str) -> None:
 )
 def test_concat_item_string_values(markup: str, expression: str, expected: str) -> None:
     assert parse_xml(markup).xpath(expression) == expected
+
+
+@pytest.mark.parametrize(
+    ("markup", "expression", "expected"),
+    [
+        pytest.param("<r><a><?p d?><![CDATA[cd]]></a></r>", "string(//processing-instruction())", "d", id="pi-data"),
+        pytest.param("<r><a><?p?>t</a></r>", "string(//a/node()[1])", "", id="pi-without-data"),
+        pytest.param("<r><a><?p d?><![CDATA[cd]]></a></r>", "string(//a)", "cd", id="element-cdata"),
+        pytest.param("<r><a>x<![CDATA[y]]>z</a></r>", "string(//a)", "xyz", id="element-mixed-run"),
+        pytest.param("<r><a>x<?p q?>y</a></r>", "string(//a)", "xy", id="element-skips-pi"),
+        pytest.param("<r><a><![CDATA[1]]><![CDATA[2]]>3</a></r>", "number(//a)", 123.0, id="number-cdata"),
+        pytest.param("<r><a><?p 7?>8</a></r>", "number(//a)", 8.0, id="number-skips-pi"),
+        pytest.param("<r><a><![CDATA[1]]>2</a></r>", "sum(//a)", 12.0, id="sum-cdata"),
+        pytest.param("<r><a>  <![CDATA[ x ]]>  </a></r>", "normalize-space(//a)", "x", id="normalize-cdata"),
+        pytest.param("<r><a>x<![CDATA[y]]>z</a></r>", "normalize-space(//a)", "xyz", id="normalize-mixed-run"),
+        pytest.param("<r><a><![CDATA[cd]]></a></r>", "contains(//a, 'cd')", True, id="contains-cdata"),
+        pytest.param("<r><a><![CDATA[cd]]></a></r>", "//a = 'cd'", True, id="equals-cdata"),
+        pytest.param("<r><a><![CDATA[cd]]></a></r>", "//a != 'cd'", False, id="not-equals-cdata"),
+        pytest.param("<r><a><![CDATA[]]></a></r>", "string-length(//a)", 0.0, id="empty-cdata"),
+    ],
+)
+def test_xml_string_values_follow_the_data_model(markup: str, expression: str, *, expected: bool | float | str) -> None:
+    assert parse_xml(markup).xpath(expression) == expected
+
+
+def test_adjacent_text_siblings_form_one_text_node() -> None:
+    document: Final = parse_xml("<r><a>x</a></r>")
+    element: Final = document.select_one("a")
+    assert element is not None
+    element.append(Text("y"))
+    assert document.xpath("count(//a/text())") == 1
+    assert document.xpath("str:concat(//a/text())") == "xy"
 
 
 def _reversed(_context: SimpleNamespace, nodes: list[Element]) -> list[Element]:
@@ -1714,6 +1748,24 @@ def test_gathering_calls_each_have_their_own_allowance(expression: str, expected
             "string-length(str:concat(//a | //comment()))",
             1_000_000.0,
             id="comment-inside",
+        ),
+        pytest.param(
+            "<a><a><a><a><?p {text}?></a></a></a></a>",
+            "string-length(str:concat(//a | //processing-instruction()))",
+            1_000_000.0,
+            id="processing-instruction-inside",
+        ),
+        pytest.param(
+            "<a><?p {text}{text}{text}?></a>",
+            "string-length(str:concat(//a | //processing-instruction()))",
+            3_000_000.0,
+            id="processing-instruction-data-inside-a-member",
+        ),
+        pytest.param(
+            "<a><!--{text}{text}{text}--></a>",
+            "string-length(str:concat(//a | //comment()))",
+            3_000_000.0,
+            id="comment-data-inside-a-member",
         ),
         pytest.param(
             "<a k='{text}'><a k='{text}'><a k='{text}'><a k='{text}'/></a></a></a>",

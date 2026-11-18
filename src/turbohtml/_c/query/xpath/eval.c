@@ -869,6 +869,32 @@ static XP_STEP_INLINE int element_name_matches(struct th_node *node, const step_
     return !match->ns_unmatchable && node->ns == match->want_ns;
 }
 
+static int is_character_data(const struct th_node *node) {
+    return node->type == TH_NODE_TEXT || node->type == TH_NODE_CDATA;
+}
+
+/* The XPath data model holds the character data of adjacent text and CDATA sections as one text node (XPath 1.0
+   section 5.7), and a text node never has an empty string-value. The first member of a run stands for the run, and
+   the later members are no nodes of the model. */
+int xp_is_text_node(const struct th_node *node) {
+    if (!is_character_data(node) || (node->prev_sibling != NULL && is_character_data(node->prev_sibling))) {
+        return 0;
+    }
+    for (const struct th_node *member = node; member != NULL && is_character_data(member);
+         member = member->next_sibling) {
+        if (member->text_len > 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether a node is one of the XPath data model's nodes: every node but the later members of a text run and a run
+   whose data is empty. */
+int xp_in_data_model(const struct th_node *node) {
+    return !is_character_data(node) || xp_is_text_node(node);
+}
+
 /* Whether a node satisfies a step's node test on an element-principal axis. */
 static XP_STEP_INLINE int node_test_matches(struct th_node *node, const xn *step, const step_match *match) {
     switch (step->test) {
@@ -877,13 +903,13 @@ static XP_STEP_INLINE int node_test_matches(struct th_node *node, const xn *step
     case NT_STAR:
         return node->type == TH_NODE_ELEMENT;
     case NT_TEXT:
-        return node->type == TH_NODE_TEXT;
+        return xp_is_text_node(node);
     case NT_COMMENT:
         return node->type == TH_NODE_COMMENT;
     case NT_PI:
         return node->type == TH_NODE_PI;
-    default: /* NT_NODE: every node but a doctype, which XPath 1.0 has no node type for */
-        return node->type != TH_NODE_DOCTYPE;
+    default: /* NT_NODE: every data-model node but a doctype, which XPath 1.0 has no node type for */
+        return node->type != TH_NODE_DOCTYPE && xp_in_data_model(node);
     }
 }
 
@@ -2404,6 +2430,77 @@ Py_UCS4 *ucs4_from_utf8(const char *src, Py_ssize_t length, Py_ssize_t *len) {
     return buffer;
 }
 
+/* Append the data of one character-data node at *at, advancing it. Returns -1 on a realization failure. */
+static int append_character_data(struct th_tree *tree, struct th_node *node, Py_UCS4 *out, Py_ssize_t *at) {
+    if (node->text_len == 0) {
+        return 0;
+    }
+    const Py_UCS4 *text = th_node_realize_text(tree, node);
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: lazy text allocation failure cannot be forced */
+        return -1;      /* GCOVR_EXCL_LINE */
+    }
+    memcpy(out + *at, text, (size_t)node->text_len * sizeof(Py_UCS4));
+    *at += node->text_len;
+    return 0;
+}
+
+/* The string-value of a text node: the character data of its run, CDATA sections included. */
+static Py_UCS4 *text_run_string(struct th_tree *tree, struct th_node *first, Py_ssize_t *len) {
+    Py_ssize_t total = 0;
+    for (struct th_node *member = first; member != NULL && is_character_data(member); member = member->next_sibling) {
+        total += member->text_len;
+    }
+    Py_UCS4 *out = PyMem_Malloc((size_t)total * sizeof(Py_UCS4));
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t at = 0;
+    for (struct th_node *member = first; member != NULL && is_character_data(member); member = member->next_sibling) {
+        if (append_character_data(tree, member, out, &at) < 0) { /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+            PyMem_Free(out);                                     /* GCOVR_EXCL_LINE */
+            return NULL;                                         /* GCOVR_EXCL_LINE */
+        }
+    }
+    *len = total;
+    return out;
+}
+
+/* The string-value of an element or the document: the character data of every text node below root, CDATA sections
+   included, in document order. Comments and processing instructions are no part of it (XPath 1.0 sections 5.1, 5.2). */
+static Py_UCS4 *subtree_text(struct th_tree *tree, struct th_node *root, Py_ssize_t *len) {
+    Py_ssize_t total = 0;
+    for (struct th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
+        if (is_character_data(node)) {
+            total += node->text_len;
+        }
+    }
+    Py_UCS4 *out = PyMem_Malloc((size_t)total * sizeof(Py_UCS4));
+    if (out == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced from a test */
+        return NULL;   /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t at = 0;
+    for (struct th_node *node = root->first_child; node != NULL; node = preorder_next(node, root)) {
+        if (is_character_data(node) && append_character_data(tree, node, out, &at) < 0) { /* GCOVR_EXCL_BR_LINE */
+            PyMem_Free(out);                                                              /* GCOVR_EXCL_LINE */
+            return NULL;                                                                  /* GCOVR_EXCL_LINE */
+        }
+    }
+    *len = total;
+    return out;
+}
+
+/* The string-value of a processing instruction is its data, which follows the target and the single space that
+   separates them in the node's text. */
+static Py_UCS4 *pi_data(struct th_tree *tree, struct th_node *node, Py_ssize_t *len) {
+    const Py_UCS4 *text = th_node_realize_text(tree, node);
+    if (text == NULL) { /* GCOVR_EXCL_BR_LINE: lazy text allocation failure cannot be forced */
+        return NULL;    /* GCOVR_EXCL_LINE */
+    }
+    Py_ssize_t data_start = node->attr_count + 1;
+    *len = node->text_len - data_start;
+    return ucs4_dup(text + data_start, *len);
+}
+
 Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len) {
     if (item.attr == -2) {
         return ucs4_from_ascii(XP_XML_NS_URI, sizeof(XP_XML_NS_URI) - 1, len);
@@ -2413,10 +2510,17 @@ Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len) {
         *len = attr_record->value == NULL ? 0 : attr_record->value_len;
         return ucs4_dup(attr_record->value, *len);
     }
-    if (item.node->type == TH_NODE_TEXT || item.node->type == TH_NODE_COMMENT) {
+    switch (item.node->type) {
+    case TH_NODE_TEXT:
+    case TH_NODE_CDATA:
+        return text_run_string(tree, item.node, len);
+    case TH_NODE_COMMENT:
         return th_node_data(tree, item.node, len);
+    case TH_NODE_PI:
+        return pi_data(tree, item.node, len);
+    default:
+        return subtree_text(tree, item.node, len);
     }
-    return th_node_text(tree, item.node, len);
 }
 
 /* Clinger's fast path: a digit run whose mantissa fits 2^53 with at most 22 digits after the point is

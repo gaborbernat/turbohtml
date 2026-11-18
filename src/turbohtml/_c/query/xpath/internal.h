@@ -334,6 +334,11 @@ const th_node_attr *xp_lang_memoized(xp_ctx *ctx, struct th_node *from, uint32_t
 
 /* The XPath string-value of a node-set member, freshly allocated. */
 Py_UCS4 *item_string(struct th_tree *tree, xp_item item, Py_ssize_t *len);
+/* Whether a node is a text node of the XPath data model: the first member of a run of adjacent text and CDATA
+   sections that holds data. The later members of a run are no nodes of the model. */
+int xp_is_text_node(const struct th_node *node);
+/* Whether a node is a node of the XPath data model, the nodes xp_is_text_node does not exclude. */
+int xp_in_data_model(const struct th_node *node);
 Py_UCS4 *ucs4_dup(const Py_UCS4 *src, Py_ssize_t len);
 Py_UCS4 *ucs4_from_ascii(const char *src, Py_ssize_t length, Py_ssize_t *len);
 Py_UCS4 *ucs4_from_utf8(const char *src, Py_ssize_t length, Py_ssize_t *len);

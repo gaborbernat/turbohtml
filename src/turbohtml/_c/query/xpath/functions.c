@@ -1015,7 +1015,7 @@ static int gather_repeats(xp_gather *seen, Py_ssize_t index) {
     }
     if (seen->at != NULL) {
         seen->last = index;
-        return item.node->type != TH_NODE_COMMENT; /* nor a comment */
+        return item.node->type != TH_NODE_COMMENT && item.node->type != TH_NODE_PI; /* nor a comment or a PI */
     }
     int follows = end == NULL ? 1 : gather_follows(seen, end, index);
     if (follows < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
@@ -1616,6 +1616,13 @@ static int set_split(const xp_result *args, int want_before, xp_result *out) {
 
 /* The EXSLT string functions (str:). */
 
+/* Whether a text node, which heads its run when it is an item, has no text or CDATA sibling after it, so its own data
+   is the string-value of the run. */
+static int text_run_is_one(const th_node *node) {
+    const th_node *after = node->next_sibling;
+    return after == NULL || (after->type != TH_NODE_TEXT && after->type != TH_NODE_CDATA);
+}
+
 static int concat_item_view(th_tree *tree, xp_item item, const Py_UCS4 **part, Py_ssize_t *len, Py_UCS4 **owned) {
     *owned = NULL;
     if (item.attr == -2) {
@@ -1631,7 +1638,7 @@ static int concat_item_view(th_tree *tree, xp_item item, const Py_UCS4 **part, P
             node->first_child->type == TH_NODE_TEXT) {
             node = node->first_child;
         }
-        if (node->type == TH_NODE_TEXT || node->type == TH_NODE_COMMENT) {
+        if (node->type == TH_NODE_COMMENT || (node->type == TH_NODE_TEXT && text_run_is_one(node))) {
             *len = node->text_len;
             *part = *len == 0 ? NULL : th_node_realize_text(tree, node);
             if (*len != 0 && *part == NULL) { /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */
@@ -1639,7 +1646,7 @@ static int concat_item_view(th_tree *tree, xp_item item, const Py_UCS4 **part, P
             }
             return 0;
         }
-        *owned = th_node_text(tree, node, len);
+        *owned = item_string(tree, item, len);
     }
     *part = *owned;
     return *owned == NULL ? -1 : 0; /* GCOVR_EXCL_BR_LINE: allocation failure cannot be forced */

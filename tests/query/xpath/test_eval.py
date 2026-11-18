@@ -1877,6 +1877,36 @@ def test_attribute_axis_of_a_text_node_is_empty() -> None:
 
 
 @pytest.mark.parametrize(
+    ("markup", "expression", "expected"),
+    [
+        pytest.param("<r><a>x<![CDATA[y]]>z</a></r>", "count(//a/text())", 1, id="mixed-run-is-one-node"),
+        pytest.param("<r><a>x<![CDATA[y]]>z</a></r>", "count(//a/node())", 1, id="node-test-sees-one-run"),
+        pytest.param("<r><a><![CDATA[cd]]></a></r>", "count(//text())", 1, id="cdata-alone-is-a-text-node"),
+        pytest.param("<r><a><![CDATA[]]></a></r>", "count(//text())", 0, id="empty-cdata-is-no-node"),
+        pytest.param("<r><a><![CDATA[]]>y</a></r>", "string(//a/text()[1])", "y", id="empty-cdata-leads-a-run"),
+        pytest.param("<r><a><![CDATA[]]><b/></a></r>", "count(//a/text())", 0, id="empty-cdata-before-element"),
+        pytest.param("<r><a>x<?p q?>y</a></r>", "count(//a/text())", 2, id="pi-splits-runs"),
+        pytest.param(
+            "<r><a>1<b><![CDATA[2]]></b>3<![CDATA[4]]></a></r>",
+            "string(//a/text()[2])",
+            "34",
+            id="second-run-of-two-members",
+        ),
+        pytest.param("<r><a>x<![CDATA[y]]>z<b/>w</a></r>", "string(//a/text()[2])", "w", id="positional-after-element"),
+        pytest.param("<r><a>x<![CDATA[y]]>z<b/>w</a></r>", "count(//a/text())", 2, id="runs-split-by-element"),
+        pytest.param("<r><a>x<![CDATA[y]]>z<b/>w</a></r>", "count(//a/text()/following::text())", 1, id="following"),
+        pytest.param("<r><a>x<![CDATA[y]]>z<b/>w</a></r>", "count(//b/preceding::text())", 1, id="preceding"),
+        pytest.param("<r><a>x<![CDATA[y]]>z<b/>w</a></r>", "count(//b/preceding-sibling::node())", 1, id="siblings"),
+        pytest.param("<r><a><?p d?><![CDATA[cd]]></a></r>", "string(//a/node()[2])", "cd", id="node-after-pi"),
+    ],
+)
+def test_text_runs_are_one_node_of_the_data_model(
+    markup: str, expression: str, *, expected: bool | float | str
+) -> None:
+    assert parse_xml(markup).xpath(expression) == expected
+
+
+@pytest.mark.parametrize(
     "expr",
     [
         pytest.param("=".join(["1"] * 5000), id="equality-spine"),

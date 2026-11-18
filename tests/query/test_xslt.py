@@ -5660,6 +5660,109 @@ def test_transform_cdata_element_with_non_text_child() -> None:
     assert result == "<d><e/><![CDATA[t]]></d>"
 
 
+@pytest.mark.parametrize(
+    ("source", "body", "method", "expected"),
+    [
+        pytest.param(
+            "<r><a>x<![CDATA[y]]>z</a></r>",
+            '<xsl:template match="/"><o><xsl:copy-of select="//a/text()"/></o></xsl:template>',
+            "xml",
+            "<o>xyz</o>",
+            id="copy-of-run",
+        ),
+        pytest.param(
+            "<r><a><?p d?><![CDATA[cd]]></a></r>",
+            '<xsl:template match="/"><o><xsl:value-of select="//a"/></o></xsl:template>',
+            "xml",
+            "<o>cd</o>",
+            id="value-of-cdata",
+        ),
+        pytest.param(
+            "<r><a><![CDATA[cd]]></a></r>",
+            '<xsl:template match="/"><o><xsl:copy-of select="//a/node()"/></o></xsl:template>',
+            "xml",
+            "<o>cd</o>",
+            id="copy-of-cdata",
+        ),
+        pytest.param(
+            "<r><a><![CDATA[cd]]></a></r>",
+            '<xsl:template match="/"><o><xsl:apply-templates select="//a/node()"/></o></xsl:template>'
+            '<xsl:template match="text()"><xsl:copy/></xsl:template>',
+            "xml",
+            "<o>cd</o>",
+            id="copy-cdata",
+        ),
+        pytest.param(
+            "<r><a><![CDATA[1]]>2</a></r>",
+            '<xsl:template match="/"><o><xsl:apply-templates/></o></xsl:template>',
+            "xml",
+            "<o>12</o>",
+            id="builtin-rule-cdata",
+        ),
+        pytest.param(
+            "<r><a>x<![CDATA[y]]>z<b/>w</a></r>",
+            '<xsl:template match="/"><xsl:apply-templates select="//a/node()"/></xsl:template>'
+            '<xsl:template match="text()">[<xsl:value-of select="."/>]</xsl:template>',
+            "text",
+            "[xyz][w]",
+            id="template-per-run",
+        ),
+        pytest.param(
+            "<r>x<![CDATA[y]]>z<b/>w</r>",
+            '<xsl:template match="/"><o><xsl:apply-templates select="/r"/></o></xsl:template>'
+            '<xsl:template match="r"><xsl:apply-templates/></xsl:template>'
+            '<xsl:template match="text()">[<xsl:value-of select="."/>]</xsl:template>',
+            "text",
+            "[xyz][w]",
+            id="default-children-of-a-run",
+        ),
+        pytest.param(
+            "<r><a>x<![CDATA[y]]>z<b/>w</a></r>",
+            '<xsl:template match="/"><xsl:apply-templates select="//a/node()"/></xsl:template>'
+            '<xsl:template match="text()">[<xsl:number/>]</xsl:template>'
+            '<xsl:template match="*">(<xsl:number/>)</xsl:template>',
+            "text",
+            "[1](1)[2]",
+            id="number-counts-runs",
+        ),
+        pytest.param(
+            "<r><a><![CDATA[p]]>q<b/>r</a></r>",
+            '<xsl:template match="/"><xsl:apply-templates select="//a/node()"/></xsl:template>'
+            '<xsl:template match="text()">[<xsl:number/>]</xsl:template>'
+            '<xsl:template match="*">(<xsl:number/>)</xsl:template>',
+            "text",
+            "[1](1)[2]",
+            id="number-counts-cdata-as-text",
+        ),
+        pytest.param(
+            "<r><a> <![CDATA[ x ]]> </a></r>",
+            '<xsl:strip-space elements="*"/><xsl:template match="/"><xsl:value-of select="//a"/></xsl:template>',
+            "text",
+            "  x  ",
+            id="strip-keeps-a-run-with-data",
+        ),
+        pytest.param(
+            "<r><a> <![CDATA[ ]]> </a></r>",
+            '<xsl:strip-space elements="*"/><xsl:template match="/">'
+            '<xsl:value-of select="count(//a/node())"/></xsl:template>',
+            "text",
+            "0",
+            id="strip-removes-a-blank-run",
+        ),
+        pytest.param(
+            "<r><a><![CDATA[ ]]></a></r>",
+            '<xsl:strip-space elements="*"/><xsl:template match="/">'
+            '<xsl:value-of select="count(//a/node())"/></xsl:template>',
+            "text",
+            "0",
+            id="strip-removes-a-blank-cdata",
+        ),
+    ],
+)
+def test_transform_text_run_is_one_text_node(source: str, body: str, method: str, expected: str) -> None:
+    assert _run(source, body, method=method) == expected
+
+
 def test_transform_namespace_alias_requires_stylesheet_prefix() -> None:
     body = '<xsl:namespace-alias result-prefix="xsl"/><xsl:template match="/">x</xsl:template>'
     with pytest.raises(ValueError, match="stylesheet-prefix and result-prefix"):

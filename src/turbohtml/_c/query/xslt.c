@@ -2763,6 +2763,19 @@ static int emit_text(engine *eng, th_node *out_parent, const Py_UCS4 *data, Py_s
     return 0;
 }
 
+/* Append the string-value of a source text node's run to out_parent: adjacent text and CDATA sections are one text node
+   of the XPath data model, and the output carries that node as text. */
+static int emit_source_text(engine *eng, th_node *out_parent, th_node *node) {
+    Py_ssize_t text_len = 0;
+    Py_UCS4 *text = item_string(eng->src_tree, (xp_item){node, -1}, &text_len);
+    if (text == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
+        return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
+    }
+    int rc = emit_text(eng, out_parent, text, text_len);
+    PyMem_Free(text);
+    return rc;
+}
+
 /* Whether an expression is the self-context ".", which needs special handling when
    the current item is an attribute (the XPath evaluator has no attribute context). */
 static int is_self_dot(const Py_UCS4 *src, Py_ssize_t len) {
@@ -3091,6 +3104,9 @@ static int copy_of_node(engine *eng, th_node *out_parent, xp_item item) {
             }
         }
         return 0;
+    }
+    if (item.node->type == TH_NODE_TEXT || item.node->type == TH_NODE_CDATA) {
+        return emit_source_text(eng, out_parent, item.node);
     }
     th_node *copy = th_tree_copy_node(eng->out_tree, eng->src_tree, item.node);
     if (copy == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
@@ -3928,7 +3944,10 @@ static int do_copy(engine *eng, th_node *instruction, th_node *out_parent) {
         }
         return instantiate_under(eng, instruction, element, bound, node);
     }
-    if (node->type == TH_NODE_TEXT || node->type == TH_NODE_COMMENT || node->type == TH_NODE_PI) {
+    if (node->type == TH_NODE_TEXT || node->type == TH_NODE_CDATA) {
+        return emit_source_text(eng, out_parent, node);
+    }
+    if (node->type == TH_NODE_COMMENT || node->type == TH_NODE_PI) {
         th_node *copy = th_tree_copy_node(eng->out_tree, eng->src_tree, node);
         if (copy == NULL) {                    /* GCOVR_EXCL_BR_LINE: alloc */
             return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
@@ -4626,7 +4645,7 @@ static int number_pattern_has(engine *eng, xslt_number_pattern *pattern, th_node
 }
 
 static xslt_number_name number_local_name(const engine *eng, const th_node *node) {
-    xslt_number_name result = {.type = node->type};
+    xslt_number_name result = {.type = node->type == TH_NODE_CDATA ? TH_NODE_TEXT : node->type};
     if (node->type == TH_NODE_PI) {
         result.name = node->text;
         result.name_len = node->attr_count;
@@ -5249,7 +5268,10 @@ static int number_counts_name(const engine *eng, const th_node *node) {
 }
 
 static int number_counts_default(const engine *eng, const th_node *node) {
-    if (node->type != eng->cur_node->type) {
+    if (!xp_in_data_model(node)) {
+        return 0;
+    }
+    if (node->type != eng->cur_node->type && !(xp_is_text_node(node) && xp_is_text_node(eng->cur_node))) {
         return 0;
     }
     if (node->type == TH_NODE_ELEMENT && eng->number_index.positions.count == 0 &&
@@ -6558,13 +6580,8 @@ static int apply_builtin(engine *eng, th_node *node, Py_ssize_t attr, const Py_U
         const th_node_attr *attribute = xp_item_attribute(eng->src_tree, (xp_item){node, attr});
         return emit_text(eng, out_parent, attribute->value, attribute->value_len);
     }
-    if (node->type == TH_NODE_TEXT) {
-        Py_ssize_t text_len = node->text_len;
-        const Py_UCS4 *text = th_node_realize_text(eng->src_tree, node);
-        if (text == NULL && text_len != 0) {   /* GCOVR_EXCL_BR_LINE: alloc */
-            return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE */
-        }
-        return emit_text(eng, out_parent, text, text_len);
+    if (xp_is_text_node(node)) {
+        return emit_source_text(eng, out_parent, node);
     }
     if (node->type == TH_NODE_ELEMENT || node->type == TH_NODE_DOCUMENT || node->type == TH_NODE_CONTENT) {
         /* a template application (section 5.8) like a matched rule, so it shares the cap that keeps a deep source off
@@ -6575,10 +6592,13 @@ static int apply_builtin(engine *eng, th_node *node, Py_ssize_t attr, const Py_U
         Py_ssize_t child_pos = 0;
         Py_ssize_t child_count = 0;
         for (th_node *child = node->first_child; child != NULL; child = child->next_sibling) {
-            child_count++;
+            child_count += xp_in_data_model(child);
         }
         int rc = 0;
         for (th_node *child = node->first_child; child != NULL && rc == 0; child = child->next_sibling) {
+            if (!xp_in_data_model(child)) {
+                continue;
+            }
             child_pos++;
             rc = apply_to_item(eng, (xp_item){child, -1}, child_pos, child_count, mode, mode_len, NULL, 0, out_parent);
         }
@@ -6613,6 +6633,9 @@ static int apply_templates(engine *eng, th_node *instruction, th_node *out_paren
         value.kind = XP_NODESET;
         if (!xp_is_attribute(eng->cur_attr)) {
             for (th_node *child = eng->cur_node->first_child; child != NULL; child = child->next_sibling) {
+                if (!xp_in_data_model(child)) {
+                    continue;
+                }
                 if (ns_push(&value.nodes, child, -1) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
                     xp_result_free(&value);                 /* GCOVR_EXCL_LINE */
                     return fail(eng, "out of memory");      /* GCOVR_EXCL_LINE */
@@ -8697,22 +8720,35 @@ static int strip_walk(engine *eng, th_node *element, int inherited_preserve) {
             continue;
         }
         th_node *child = frame->child;
-        frame->child = child->next_sibling;
-        if (child->type == TH_NODE_TEXT) {
-            int blank = frame->strips ? th_node_text_is_blank(eng->src_tree, child) : 0;
-            if (blank < 0) {                       /* GCOVR_EXCL_BR_LINE: lazy text OOM */
-                PyMem_Free(frames);                /* GCOVR_EXCL_LINE: allocation failure */
-                return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE: allocation failure */
+        if (child->type == TH_NODE_TEXT || child->type == TH_NODE_CDATA) {
+            /* a text run is one text node of the data model, so it is stripped whole or kept whole */
+            th_node *run_end = child;
+            while (run_end != NULL && (run_end->type == TH_NODE_TEXT || run_end->type == TH_NODE_CDATA)) {
+                run_end = run_end->next_sibling;
             }
-            if (blank) {
-                if (strip_record(eng, child, frame->element, frame->child) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
-                    PyMem_Free(frames);                                           /* GCOVR_EXCL_LINE */
-                    return -1;                                                    /* GCOVR_EXCL_LINE */
+            frame->child = run_end;
+            int blank = frame->strips;
+            for (th_node *member = child; blank > 0 && member != run_end; member = member->next_sibling) {
+                blank = th_node_text_is_blank(eng->src_tree, member);
+                if (blank < 0) {                       /* GCOVR_EXCL_BR_LINE: lazy text OOM */
+                    PyMem_Free(frames);                /* GCOVR_EXCL_LINE: allocation failure */
+                    return fail(eng, "out of memory"); /* GCOVR_EXCL_LINE: allocation failure */
                 }
-                th_node_remove(child);
             }
-        } else if (child->type == TH_NODE_ELEMENT && /* GCOVR_EXCL_BR_LINE: failure requires allocation exhaustion */
-                   strip_push(eng, &frames, &length, &capacity, child, frame->preserve) < 0) {
+            for (th_node *member = child; blank > 0 && member != run_end;) {
+                th_node *next = member->next_sibling;
+                if (strip_record(eng, member, frame->element, next) < 0) { /* GCOVR_EXCL_BR_LINE: alloc */
+                    PyMem_Free(frames);                                    /* GCOVR_EXCL_LINE */
+                    return -1;                                             /* GCOVR_EXCL_LINE */
+                }
+                th_node_remove(member);
+                member = next;
+            }
+            continue;
+        }
+        frame->child = child->next_sibling;
+        if (child->type == TH_NODE_ELEMENT && /* GCOVR_EXCL_BR_LINE: failure requires allocation exhaustion */
+            strip_push(eng, &frames, &length, &capacity, child, frame->preserve) < 0) {
             PyMem_Free(frames); /* GCOVR_EXCL_LINE */
             return -1;          /* GCOVR_EXCL_LINE */
         }
