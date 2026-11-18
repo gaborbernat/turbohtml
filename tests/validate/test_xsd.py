@@ -1996,6 +1996,264 @@ def test_attribute_name_index_is_rebuilt_for_each_element() -> None:
     assert [error.message for error in undeclared.errors] == ["attribute 'a0' is not declared"]
 
 
+@pytest.mark.parametrize(
+    ("declarations", "attributes", "expected"),
+    [
+        pytest.param('<xs:attribute name="o" type="xs:int" use="optional"/>', "", [], id="optional-absent"),
+        pytest.param(
+            '<xs:attribute name="o" type="xs:int" use="optional"/>',
+            'o="zz"',
+            ["value 'zz' is not a valid int"],
+            id="optional-present",
+        ),
+        pytest.param('<xs:attribute name="é" type="xs:int"/>', 'é="12"', [], id="non-ascii-name-matched"),
+        pytest.param(
+            '<xs:attribute name="é" type="xs:int"/>',
+            'é="zz"',
+            ["value 'zz' is not a valid int"],
+            id="non-ascii-name-value-checked",
+        ),
+        pytest.param(
+            '<xs:attribute name="é" use="required"/>',
+            'e=""',
+            ["required attribute 'é' is missing", "attribute 'e' is not declared"],
+            id="non-ascii-name-not-its-ascii-lookalike",
+        ),
+        pytest.param('<xs:attribute name="中文" use="required"/>', '中文=""', [], id="wide-name-matched"),
+        pytest.param(
+            '<xs:attribute name="中" use="prohibited"/>', '中=""', ["attribute '中' is prohibited"], id="prohibited"
+        ),
+    ],
+)
+@pytest.mark.parametrize("padding", [pytest.param(0, id="few-uses"), pytest.param(40, id="many-uses")])
+def test_attribute_use_matches_name_and_kind(
+    declarations: str, attributes: str, expected: list[str], padding: int
+) -> None:
+    filler = "".join(f'<xs:attribute name="item{index}" type="xs:string"/>' for index in range(padding))
+    schema: Final = (
+        f'<xs:schema {_XS}><xs:element name="r"><xs:complexType>{filler}{declarations}'
+        "</xs:complexType></xs:element></xs:schema>"
+    )
+    assert [error.message for error in check(schema, f"<r {attributes}/>").errors] == expected
+
+
+def test_base_type_uses_are_reported_before_the_derived_ones() -> None:
+    schema: Final = (
+        f'<xs:schema {_XS}><xs:complexType name="base"><xs:attribute name="b" use="required"/></xs:complexType>'
+        '<xs:element name="r"><xs:complexType><xs:complexContent><xs:extension base="base">'
+        '<xs:attribute name="d" use="required"/></xs:extension></xs:complexContent></xs:complexType></xs:element>'
+        "</xs:schema>"
+    )
+    assert [error.message for error in check(schema, "<r/>").errors] == [
+        "required attribute 'b' is missing",
+        "required attribute 'd' is missing",
+    ]
+
+
+_LEVEL_MISSING: Final[list[str]] = [
+    "required attribute 'ra' is missing",
+    "required attribute 'rb' is missing",
+    "required attribute 'rd' is missing",
+]
+_LEVEL_BASE: Final[str] = (
+    '<xs:complexType name="a"><xs:attribute name="ra" use="required"/><xs:attribute name="x" type="xs:int"/>'
+    "</xs:complexType>"
+)
+_LEVEL_MIDDLE: Final[str] = (
+    '<xs:complexType name="b"><xs:complexContent><xs:extension base="a">'
+    '<xs:attribute name="rb" use="required"/></xs:extension></xs:complexContent></xs:complexType>'
+)
+
+
+@pytest.mark.parametrize(
+    ("instance", "expected"),
+    [
+        pytest.param("<r/>", _LEVEL_MISSING, id="missing"),
+        pytest.param("<r ra='1' rb='1' rd='1' x='4'/>", ["attribute 'x' must equal its fixed value"], id="fixed"),
+        pytest.param("<r ra='1' rb='1' rd='1' x='3'/>", [], id="valid"),
+    ],
+)
+@pytest.mark.parametrize(
+    "types",
+    [
+        pytest.param(f"{_LEVEL_BASE}{_LEVEL_MIDDLE}", id="base-declared-first"),
+        pytest.param(f"{_LEVEL_MIDDLE}{_LEVEL_BASE}", id="derived-declared-first"),
+    ],
+)
+def test_three_level_derivation_reports_base_uses_first(instance: str, expected: list[str], types: str) -> None:
+    root: Final = (
+        '<xs:element name="r"><xs:complexType><xs:complexContent><xs:extension base="b">'
+        '<xs:attribute name="rd" use="required"/><xs:attribute name="x" type="xs:int" fixed="3"/>'
+        "</xs:extension></xs:complexContent></xs:complexType></xs:element>"
+    )
+    schema: Final = f"<xs:schema {_XS}>{types}{root}</xs:schema>"
+    assert [error.message for error in check(schema, instance).errors] == expected
+
+
+def test_wildcard_admitting_at_the_base_decides_before_derived_wildcards() -> None:
+    # the base's strict wildcard admits x:q and finds no declaration, so the derived skip wildcard never sees it
+    schema: Final = (
+        f'<xs:schema {_XS}><xs:complexType name="a"><xs:sequence/>'
+        '<xs:anyAttribute namespace="urn:x" processContents="strict"/></xs:complexType>'
+        '<xs:complexType name="b"><xs:complexContent><xs:extension base="a"><xs:sequence/>'
+        '<xs:anyAttribute namespace="##any" processContents="skip"/></xs:extension>'
+        "</xs:complexContent></xs:complexType>"
+        '<xs:element name="r"><xs:complexType><xs:complexContent><xs:extension base="b"><xs:sequence/>'
+        "</xs:extension></xs:complexContent></xs:complexType></xs:element></xs:schema>"
+    )
+    assert [error.message for error in check(schema, "<r xmlns:x='urn:x' x:q='1'/>").errors] == [
+        "attribute 'x:q' is not declared"
+    ]
+
+
+def test_restriction_keeps_the_base_use_it_restates() -> None:
+    # validation checks the base's required use even though the restriction makes it optional
+    schema: Final = (
+        f'<xs:schema {_XS}><xs:complexType name="base"><xs:attribute name="a" use="required"/></xs:complexType>'
+        '<xs:element name="r"><xs:complexType><xs:complexContent><xs:restriction base="base">'
+        '<xs:attribute name="a" use="optional"/></xs:restriction></xs:complexContent></xs:complexType></xs:element>'
+        "</xs:schema>"
+    )
+    assert [error.message for error in check(schema, "<r/>").errors] == ["required attribute 'a' is missing"]
+
+
+def test_attribute_group_is_shared_by_every_type_that_refers_to_it() -> None:
+    schema: Final = (
+        f'<xs:schema {_XS}><xs:attributeGroup name="g"><xs:attribute name="q" use="required"/></xs:attributeGroup>'
+        '<xs:complexType name="a"><xs:attributeGroup ref="g"/></xs:complexType>'
+        '<xs:element name="r"><xs:complexType><xs:complexContent><xs:extension base="a">'
+        '<xs:attributeGroup ref="g"/></xs:extension></xs:complexContent></xs:complexType></xs:element></xs:schema>'
+    )
+    assert [error.message for error in check(schema, "<r/>").errors] == [
+        "required attribute 'q' is missing",
+        "required attribute 'q' is missing",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("attributes", "expected"),
+    [
+        pytest.param('x="1" p:x="zz"', [], id="declared-name-first"),
+        pytest.param('p:x="zz" x="1"', ["value 'zz' is not a valid int"], id="prefixed-name-first"),
+    ],
+)
+def test_first_attribute_in_document_order_stands_for_a_declaration(attributes: str, expected: list[str]) -> None:
+    # HTML parsing keeps both names, since xmlns:p="" leaves p unbound and the two names differ
+    schema: Final = XMLSchema(
+        f'<xs:schema {_XS}><xs:element name="r"><xs:complexType>'
+        '<xs:attribute name="x" type="xs:int"/></xs:complexType></xs:element></xs:schema>'
+    )
+    element: Final = parse(f'<r xmlns:p="" {attributes}></r>').find("r")
+    assert element is not None
+    assert [error.message for error in schema.validate(element).errors] == expected
+
+
+def test_attribute_added_after_a_matching_one_is_not_the_checked_one() -> None:
+    # the second attribute, added by a DOM edit, names the same declaration and sits later in document order
+    schema: Final = XMLSchema(
+        f'<xs:schema {_XS} targetNamespace="u" xmlns:t="u" elementFormDefault="qualified" '
+        'attributeFormDefault="qualified"><xs:element name="r"><xs:complexType>'
+        '<xs:attribute name="x" type="xs:int"/></xs:complexType></xs:element></xs:schema>'
+    )
+    document: Final = parse_xml('<t:r xmlns:t="u" xmlns:a="u" a:x="zz"/>')
+    root = document.root
+    assert root is not None
+    root.attrs["xmlns:b"] = "u"
+    root.attrs["b:x"] = "1"
+    assert [error.message for error in schema.validate(document).errors] == ["value 'zz' is not a valid int"]
+
+
+def test_attribute_group_shared_by_a_base_and_a_derived_type() -> None:
+    schema: Final = XMLSchema(
+        f"<xs:schema {_XS}>"
+        '<xs:attributeGroup name="g"><xs:attribute name="q" use="required"/>'
+        '<xs:anyAttribute namespace="urn:x" processContents="skip"/></xs:attributeGroup>'
+        '<xs:complexType name="a"><xs:attributeGroup ref="g"/><xs:attribute name="own" type="xs:int"/></xs:complexType>'
+        '<xs:complexType name="b"><xs:complexContent><xs:extension base="a">'
+        '<xs:attribute name="d" use="required"/></xs:extension></xs:complexContent></xs:complexType>'
+        '<xs:element name="e1" type="a"/><xs:element name="e2" type="b"/></xs:schema>'
+    )
+    assert [error.message for error in schema.validate(parse_xml("<e1 xmlns:x='urn:x' x:z='1'/>")).errors] == [
+        "required attribute 'q' is missing"
+    ]
+    assert [error.message for error in schema.validate(parse_xml("<e2 own='x'/>")).errors] == [
+        "required attribute 'q' is missing",
+        "value 'x' is not a valid int",
+        "required attribute 'd' is missing",
+    ]
+
+
+def test_attribute_group_wildcard_still_admits_after_a_nested_element() -> None:
+    # checking the nested <c> once overwrote the wildcard the group contributed to the outer walk on the main branch
+    schema: Final = (
+        f'<xs:schema {_XS}><xs:attributeGroup name="g"><xs:anyAttribute processContents="lax"/></xs:attributeGroup>'
+        '<xs:complexType name="t"><xs:attributeGroup ref="g"/><xs:attribute name="a"/></xs:complexType>'
+        '<xs:element name="r"><xs:complexType><xs:sequence><xs:element name="c" type="t" maxOccurs="unbounded"/>'
+        "</xs:sequence></xs:complexType></xs:element></xs:schema>"
+    )
+    assert check(schema, '<r><c a="1" z="1"/></r>').valid
+
+
+_UNDECLARED: Final[list[str]] = ["attribute 'a' is not declared"]
+
+
+@pytest.mark.parametrize(
+    ("declarations", "instance", "expected"),
+    [
+        pytest.param("<xs:complexContent/>", "<r/>", [], id="complex-content-empty"),
+        pytest.param("<xs:complexContent/>", '<r a="1"/>', _UNDECLARED, id="complex-content-undeclared"),
+        pytest.param("<xs:simpleContent/>", "<r/>", [], id="simple-content-empty"),
+        pytest.param("<xs:simpleContent/>", '<r a="1"/>', _UNDECLARED, id="simple-content-undeclared"),
+        pytest.param('<xs:attribute name="b"/><xs:complexContent/>', '<r b="1"/>', [], id="own-attribute-declared"),
+        pytest.param(
+            '<xs:attribute name="b"/><xs:complexContent/>', '<r a="1"/>', _UNDECLARED, id="own-attribute-undeclared"
+        ),
+    ],
+)
+def test_content_without_a_derivation_declares_only_its_own_attributes(
+    declarations: str, instance: str, expected: list[str]
+) -> None:
+    # the content node has neither an extension nor a restriction, so the type has no base to walk into
+    schema: Final = (
+        f'<xs:schema {_XS}><xs:complexType name="t">{declarations}</xs:complexType>'
+        '<xs:element name="r" type="t"/></xs:schema>'
+    )
+    assert [error.message for error in check(schema, instance).errors] == expected
+
+
+def test_doubling_attribute_group_ladder_reports_every_path() -> None:
+    # each level refers to the one below it twice, so the required use at the bottom is reached by 2**5 paths
+    groups: Final = "".join(
+        f'<xs:attributeGroup name="g{index}"><xs:attributeGroup ref="g{index - 1}"/>'
+        f'<xs:attributeGroup ref="g{index - 1}"/></xs:attributeGroup>'
+        for index in range(1, 6)
+    )
+    schema: Final = XMLSchema(
+        f'<xs:schema {_XS}><xs:attributeGroup name="g0"><xs:attribute name="a" use="required"/>'
+        f'</xs:attributeGroup>{groups}<xs:element name="r"><xs:complexType><xs:attributeGroup ref="g5"/>'
+        "</xs:complexType></xs:element></xs:schema>"
+    )
+    errors: Final = schema.validate(parse_xml("<r/>")).errors
+    assert [error.message for error in errors] == ["required attribute 'a' is missing"] * 32
+
+
+def test_long_derivation_chain_checks_every_level() -> None:
+    levels: Final = 60
+    base: Final = '<xs:complexType name="t0"><xs:attribute name="a0" use="required"/></xs:complexType>'
+    derived: Final = [
+        f'<xs:complexType name="t{index}"><xs:complexContent><xs:extension base="t{index - 1}">'
+        f'<xs:attribute name="a{index}" use="required"/></xs:extension></xs:complexContent></xs:complexType>'
+        for index in range(1, levels)
+    ]
+    schema: Final = f'<xs:schema {_XS}>{base}{"".join(derived)}<xs:element name="r" type="t{levels - 1}"/></xs:schema>'
+    complete: Final = " ".join(f'a{index}="1"' for index in range(levels))
+    without_base: Final = " ".join(f'a{index}="1"' for index in range(1, levels))
+    assert check(schema, f"<r {complete}/>").valid
+    assert [error.message for error in check(schema, f"<r {without_base}/>").errors] == [
+        "required attribute 'a0' is missing"
+    ]
+
+
 _OPTIONAL_A: Final[str] = '<xs:element name="a" minOccurs="0"/>'
 _OPTIONAL_PAIR: Final[str] = f'<xs:sequence minOccurs="0">{_A_ELEMENT * 2}</xs:sequence>'
 _EMPTIABLE_BODIES: Final[list[pytest.ParameterSet]] = [

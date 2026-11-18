@@ -966,11 +966,12 @@ typedef struct th_schema {
     /* the xs:any particle that consumed each child of the complex element a validate() call matches */
     th_node **wild_claims;
     size_t wild_claim_cap;
-    /* XSD name lookup list of one validate() call, refilled for each element, and the index over it that an element
-       with many attributes builds */
+    /* XSD name lookup list of one validate() call, refilled for each element */
     struct edecl *edecl_items;
     Py_ssize_t edecl_cap;
-    named_vec attr_names;
+    /* the index of an element's instance attributes that its validation checks uses against, refilled for each element
+     */
+    struct xattr_scratch *attr_scratch;
     struct xfacet_entry *facet_entries;
     size_t facet_count, facet_cap;
     /* every xs:all group's members indexed by name, sorted by the group's node pointer */
@@ -981,6 +982,10 @@ typedef struct th_schema {
     size_t child_count, child_cap;
     /* per sqnames entry of an XSD schema, at the same index: what xsd_cache_facets classified the element as */
     struct xnode *xnodes;
+    /* the records of the complexType elements of the schema, in document order, whose attribute tables xsd_cache_attrs
+     * builds */
+    struct xnode **complex_records;
+    size_t complex_count, complex_cap;
     /* the xmlns declarations in scope on the instance walk of one validate() call */
     nsscope ns;
     int complex_extension; /* a complexContent extension exists, so the compile-time xs:all extension check has work to
@@ -1663,7 +1668,7 @@ TH_NODE_API(, PyObject *, turbohtml_schema_validate, (PyObject * module, PyObjec
     local.posset_spares = NULL;
     local.edecl_items = NULL;
     local.edecl_cap = 0;
-    local.attr_names = (named_vec){0};
+    local.attr_scratch = NULL;
     attr_scope tree_ns = {.tree = local.tree, .mem = &local.mem};
     local.tree_ns = &tree_ns;
 #ifdef TH_STACK_FLOOR

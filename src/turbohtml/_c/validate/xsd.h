@@ -262,16 +262,50 @@ typedef struct xchild_entry {
     th_node *model_group;            /* the first sequence, choice or all child, whichever leads */
     xchild *particles;               /* the element, model group, group and any children, in document order */
     size_t particle_count, particle_cap;
-    xchild *attrs; /* every child xsd_collect_attrs reads, in document order */
+    xchild *attrs; /* every child xsd_collect_uses reads, in document order */
     size_t attr_count, attr_cap;
 } xchild_entry;
+
+enum { XSD_USE_OPTIONAL, XSD_USE_REQUIRED, XSD_USE_PROHIBITED };
+enum { XSD_ITEM_USE, XSD_ITEM_WILD, XSD_ITEM_TABLE };
+
+/* One step of an attribute walk, in the order validation reports them: an attribute use the table declares, a wildcard,
+   or another table (an attribute group or a base type), which the walk enters in place. A use carries what matching
+   needs, so that a lookup reads no schema node: its local name, the low bits of its hash, and whether its name is in
+   the target namespace (a name that is not is in no namespace). */
+typedef struct {
+    unsigned char kind; /* XSD_ITEM_USE, XSD_ITEM_WILD or XSD_ITEM_TABLE */
+    unsigned char use;  /* XSD_USE_* for a use */
+    unsigned char qualified;
+    uint32_t hash;
+    const Py_UCS4 *local;
+    Py_ssize_t local_len;
+    union {
+        th_node *decl; /* the declaration that types a use, or the wildcard */
+        const struct xattr_table *table;
+    } of;
+} xitem;
+
+/* The attribute walk an attribute group or a complexType declares itself, and the tables it enters. Each group and type
+   has one table, shared by every type that refers to it. Its items are allocated at their bound, from the child
+   entries, before the walk fills them, so no growth leaves a discarded array in the arena. */
+typedef struct xattr_table {
+    xitem *items;
+    size_t item_count;
+    size_t
+        *wilds; /* the items that can admit an attribute, in walk order: the wildcards and the tables that hold one */
+    size_t wild_count;
+    int has_uses; /* a use is reached from this table, either its own or through a table it enters */
+    int failed;   /* a table it enters could not be built */
+} xattr_table;
 
 /* A schema element as xsd_cache_facets classified it on its visit, so its children read the kind instead of asking
    again. */
 typedef struct xnode {
-    int kind;         /* its XSD_CHILD_NAMES kind, or XSD_CHILD_KINDS */
-    size_t children;  /* its child entry, or XSD_NO_ENTRY */
-    struct xnode *up; /* its parent's record, NULL for the root */
+    int kind;           /* its XSD_CHILD_NAMES kind, or XSD_CHILD_KINDS */
+    size_t children;    /* its child entry, or XSD_NO_ENTRY */
+    struct xnode *up;   /* its parent's record, NULL for the root */
+    xattr_table *attrs; /* an attribute group's or complexType's table, NULL for any other element */
 } xnode;
 
 /* The xnodes record of a schema element, whose qname schema_node_qname returned as `name`: that qname sits in the
@@ -1228,6 +1262,8 @@ static int xsd_cache_facets(th_schema *schema, th_node *root) {
 
 /* Classify node once and enter it under its parent, whose record the walk passes in: the walk reaches a parent before
    its children. Returns node's record, or NULL with an exception set. */
+static int xsd_push_complex(th_schema *schema, xnode *record);
+
 static xnode *xsd_cache_facets_at(th_schema *schema, th_node *node, xnode *parent) {
     const qname *name = schema_node_qname(schema, node);
     const int xsd = is_xsd_uri(name->uri, name->uri_len);
@@ -1236,6 +1272,9 @@ static xnode *xsd_cache_facets_at(th_schema *schema, th_node *node, xnode *paren
     own->kind = kind;
     own->children = XSD_NO_ENTRY;
     own->up = parent;
+    if (kind == XSD_COMPLEX_TYPE && xsd_push_complex(schema, own) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM */
+        return NULL;                                                     /* GCOVR_EXCL_LINE */
+    }
     if (xsd) {
         if (xsd_check_names(schema, node, name, kind) < 0) {
             return NULL;
@@ -1529,6 +1568,20 @@ static void *xsd_grow(th_schema *schema, void *items, size_t count, size_t *cap,
     }
     *cap = capacity;
     return grown;
+}
+
+/* Enters the record of a complexType element, so that xsd_cache_attrs reads its children without walking every element.
+ */
+static int xsd_push_complex(th_schema *schema, xnode *record) {
+    xnode **grown =
+        xsd_grow(schema, schema->complex_records, schema->complex_count, &schema->complex_cap, sizeof(xnode *));
+    if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return -1;       /* GCOVR_EXCL_LINE */
+    }
+    record->attrs = NULL;
+    schema->complex_records = grown;
+    schema->complex_records[schema->complex_count++] = record;
+    return 0;
 }
 
 /* The XSD_CHILD_NAMES kind of an XSD element's local name, or XSD_CHILD_KINDS for a name validation never looks up. */
@@ -1963,11 +2016,6 @@ static void xsd_validate_simple(valctx *ctx, th_node *node, int builtin_id, th_n
 
 /* ---- attributes ---- */
 
-typedef struct {
-    Py_ssize_t *slots;
-    size_t capacity;
-} xattr_index;
-
 /* An instance attribute name split at its prefix. A prefix with no declaration in scope leaves the whole name as the
    local name in no namespace, which is how an HTML-parsed tree keeps it. */
 typedef struct {
@@ -2024,56 +2072,12 @@ static const Py_UCS4 *xsd_attr_decl_uri(th_schema *schema, th_node *decl, Py_ssi
     Py_ssize_t form_len = 0;
     const Py_UCS4 *form = xsd_attr(schema->tree, decl, "form", &form_len);
     const int qualified = form != NULL ? u_eq_ascii(form, form_len, "qualified") : schema->attribute_qualified;
-    if (is_schema_el(schema, decl->parent, XSD_NS, "schema") || qualified) {
+    if (decl->parent == schema->root || qualified) {
         *len = schema->target_ns_len;
         return schema->target_ns;
     }
     *len = 0;
     return NULL;
-}
-
-/* Whether an instance attribute is the declared attribute (local, uri) it is matched against. */
-static int xsd_attr_is_decl(th_schema *schema, th_tree *tree, const th_node_attr *attr, const Py_UCS4 *local,
-                            Py_ssize_t local_len, const Py_UCS4 *uri, Py_ssize_t uri_len) {
-    Py_ssize_t name_len = 0;
-    const char *bytes = th_attr_name(tree, attr->name_atom, &name_len);
-    const xattr_name name = xsd_attr_name(schema, bytes, name_len);
-    return u_eq_utf8(local, local_len, name.local, name.local_len) && u_eq_u(name.uri, name.uri_len, uri, uri_len);
-}
-
-static int xsd_index_attrs(valctx *ctx, th_node *instance, xattr_index *index) {
-    if (instance->attr_count < 32) {
-        return 0;
-    }
-    size_t bytes;
-    /* GCOVR_EXCL_BR_START: allocation size overflow */
-    if (!th_grow_cap((size_t)instance->attr_count * 2, 0, 64, sizeof(*index->slots), &index->capacity, &bytes)) {
-        PyErr_NoMemory(); /* GCOVR_EXCL_LINE: allocation failure */
-        return -1;        /* GCOVR_EXCL_LINE: allocation failure */
-    }
-    /* GCOVR_EXCL_BR_STOP */
-    index->slots = arena_alloc(&ctx->schema->mem, bytes);
-    if (index->slots == NULL) { /* GCOVR_EXCL_BR_LINE: arena allocation failure */
-        PyErr_NoMemory();       /* GCOVR_EXCL_LINE: allocation failure */
-        return -1;              /* GCOVR_EXCL_LINE: allocation failure */
-    }
-    memset(index->slots, 0, bytes);
-    for (Py_ssize_t position = 0; position < instance->attr_count; position++) {
-        Py_ssize_t length;
-        const char *name = th_attr_name(ctx->tree, instance->attrs[position].name_atom, &length);
-        const xattr_name qualified = xsd_attr_name(ctx->schema, name, length);
-        uint64_t hash = UINT64_C(1469598103934665603);
-        for (Py_ssize_t byte = 0; byte < qualified.local_len; byte++) {
-            hash ^= (unsigned char)qualified.local[byte];
-            hash *= UINT64_C(1099511628211);
-        }
-        size_t slot = (size_t)hash & (index->capacity - 1);
-        while (index->slots[slot] != 0) {
-            slot = (slot + 1) & (index->capacity - 1);
-        }
-        index->slots[slot] = position + 1;
-    }
-    return 0;
 }
 
 /* The value an instance attribute holds against its declaration: the fixed value, then the type. */
@@ -2111,70 +2115,6 @@ static void xsd_validate_attr_value(valctx *ctx, th_node *instance, th_node *eff
     }
 }
 
-/* Validate one declared attribute against the instance, honoring use/fixed/default. */
-static XSD_FORCEINLINE void xsd_validate_attr_decl(valctx *ctx, th_node *instance, th_node *decl,
-                                                   const xattr_index *attrs) {
-    th_schema *schema = ctx->schema;
-    th_tree *tree = schema->tree;
-    th_tree *inst = ctx->tree;
-    th_node *effective = decl;
-    Py_ssize_t ref_len = 0;
-    const Py_UCS4 *ref = xsd_attr(tree, decl, "ref", &ref_len);
-    if (ref != NULL) {
-        const Py_UCS4 *local, *prefix;
-        Py_ssize_t local_len = 0, prefix_len = 0;
-        split_prefix(ref, ref_len, &local, &local_len, &prefix, &prefix_len);
-        /* xsd_compile has already rejected an attribute ref that resolves to nothing */
-        effective = named_find(&schema->attributes, local, local_len);
-    }
-    Py_ssize_t name_len = 0;
-    const Py_UCS4 *name = xsd_attr(tree, effective, "name", &name_len);
-    if (name == NULL) {
-        return;
-    }
-    Py_ssize_t use_len = 0;
-    const Py_UCS4 *use = xsd_attr(tree, decl, "use", &use_len);
-    int required = use != NULL && u_eq_ascii(use, use_len, "required");
-    int prohibited = use != NULL && u_eq_ascii(use, use_len, "prohibited");
-    char namebuf[256];
-    const char *name_bytes = name_utf8(name, name_len, namebuf, sizeof(namebuf));
-    Py_ssize_t decl_uri_len = 0;
-    const Py_UCS4 *decl_uri = xsd_attr_decl_uri(schema, effective, &decl_uri_len);
-    const th_node_attr *present = NULL;
-    if (attrs->slots != NULL) {
-        size_t slot = (size_t)named_hash(name, name_len) & (attrs->capacity - 1);
-        while (attrs->slots[slot] != 0) {
-            const th_node_attr *candidate = &instance->attrs[attrs->slots[slot] - 1];
-            if (xsd_attr_is_decl(schema, inst, candidate, name, name_len, decl_uri, decl_uri_len)) {
-                present = candidate;
-                break;
-            }
-            slot = (slot + 1) & (attrs->capacity - 1);
-        }
-    }
-    for (Py_ssize_t index = 0; attrs->slots == NULL && index < instance->attr_count; index++) {
-        if (xsd_attr_is_decl(schema, inst, &instance->attrs[index], name, name_len, decl_uri, decl_uri_len)) {
-            present = &instance->attrs[index];
-            break;
-        }
-    }
-    if (present == NULL) {
-        if (required) {
-            report(ctx, instance, "structure", "required attribute '%s' is missing", name_bytes);
-        }
-        return;
-    }
-    if (prohibited) {
-        report(ctx, instance, "structure", "attribute '%s' is prohibited", name_bytes);
-        return;
-    }
-    xsd_validate_attr_value(ctx, instance, effective, present, name_bytes);
-}
-
-/* Collect and validate the declared attributes of a complexType (own, attributeGroup
-   refs, and the extension base), then flag any undeclared instance attribute. */
-static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared);
-
 /* The content child a complexType derives through: XSD allows one, and with several every walk takes the same one, so
    the base chain xsd_check_chains bounds is the chain validation recurses along. */
 static th_node *xsd_type_content(const th_schema *schema, th_node *ctype) {
@@ -2182,12 +2122,118 @@ static th_node *xsd_type_content(const th_schema *schema, th_node *ctype) {
     return content != NULL ? content : first_schema_child(schema, ctype, XSD_NS, "simpleContent");
 }
 
-static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared,
-                              const xattr_index *attrs, edecl_vec *wilds) {
-    th_schema *schema = ctx->schema;
+/* The attribute table of a complexType, which xsd_cache_attrs built when the schema compiled, or NULL before that. */
+static const xattr_table *xsd_attr_table_cached(const th_schema *schema, th_node *ctype) {
+    return xsd_xnode(schema, schema_node_qname(schema, ctype))->attrs;
+}
+
+/* The declaration an attribute particle stands for: the global attribute its ref names, or the particle itself. */
+static th_node *xsd_attr_effective(th_schema *schema, th_node *particle) {
+    Py_ssize_t ref_len = 0;
+    const Py_UCS4 *ref = xsd_attr(schema->tree, particle, "ref", &ref_len);
+    if (ref == NULL) {
+        return particle;
+    }
+    const Py_UCS4 *local, *prefix;
+    Py_ssize_t local_len = 0, prefix_len = 0;
+    split_prefix(ref, ref_len, &local, &local_len, &prefix, &prefix_len);
+    /* xsd_compile has already rejected an attribute ref that resolves to nothing */
+    return named_find(&schema->attributes, local, local_len);
+}
+
+/* The extension or restriction child of a complexType's content. */
+static th_node *xsd_derivation(th_schema *schema, th_node *content) {
+    th_node *derivation = xsd_child(schema, content, XSD_EXTENSION);
+    return derivation != NULL ? derivation : xsd_child(schema, content, XSD_RESTRICTION);
+}
+
+/* The complexType a derivation extends or restricts, or NULL when it names none or names a simple type. */
+static th_node *xsd_base_type(th_schema *schema, th_node *derivation) {
+    Py_ssize_t base_len = 0;
+    if (xsd_attr(schema->tree, derivation, "base", &base_len) == NULL) {
+        return NULL;
+    }
+    const qname written = schema_node_entry(schema, derivation)->base;
+    return named_find(&schema->complex_types, written.local, written.local_len);
+}
+
+/* An instance attribute as validation indexes it: its name split at the prefix, and whether a use or wildcard has
+   claimed it. */
+typedef struct {
+    xattr_name name;
+    int known;
+} xattr_item;
+
+/* The instance-attribute index one validate() call builds for each element. The index is reused across elements, so it
+   grows only to the largest element met. */
+typedef struct xattr_scratch {
+    xattr_item *items;
+    size_t item_cap;
+    size_t *slots; /* open addressing over items by local name, each entry an item index plus one */
+    size_t slot_alloc;
+    size_t slot_cap;          /* the slots this element uses, a power of two */
+    const Py_UCS4 *target_ns; /* the namespace a qualified use is in */
+    Py_ssize_t target_ns_len;
+} xattr_scratch;
+
+static void xsd_push_item(xattr_table *table, const xitem *item) {
+    if (item->kind == XSD_ITEM_WILD || (item->kind == XSD_ITEM_TABLE && item->of.table->wild_count > 0)) {
+        table->wilds[table->wild_count++] = table->item_count;
+    }
+    table->items[table->item_count++] = *item;
+}
+
+static void xsd_collect_attribute(th_schema *schema, xattr_table *table, th_node *particle) {
+    th_node *decl = xsd_attr_effective(schema, particle);
+    Py_ssize_t name_len = 0;
+    const Py_UCS4 *name = xsd_attr(schema->tree, decl, "name", &name_len);
+    if (name == NULL) {
+        return;
+    }
+    Py_ssize_t uri_len = 0;
+    const Py_UCS4 *uri = xsd_attr_decl_uri(schema, decl, &uri_len);
+    Py_ssize_t use_len = 0;
+    const Py_UCS4 *use = xsd_attr(schema->tree, particle, "use", &use_len);
+    int kind = XSD_USE_OPTIONAL;
+    if (use != NULL && u_eq_ascii(use, use_len, "required")) {
+        kind = XSD_USE_REQUIRED;
+    } else if (use != NULL && u_eq_ascii(use, use_len, "prohibited")) {
+        kind = XSD_USE_PROHIBITED;
+    }
+    const xitem item = {.kind = XSD_ITEM_USE,
+                        .use = (unsigned char)kind,
+                        .qualified = uri != NULL,
+                        .hash = (uint32_t)named_hash(name, name_len),
+                        .local = name,
+                        .local_len = name_len,
+                        .of.decl = decl};
+    table->has_uses = 1;
+    xsd_push_item(table, &item);
+}
+
+/* Gathers the attribute uses, wildcards and base step of `scope` into its table. An attribute group ref expands in
+   place, so the group's uses belong to the table of each type that refers to it. The base type's table must be built
+   already. */
+static const xattr_table *xsd_attr_table_of(th_schema *schema, th_node *node);
+
+/* Enters the table of an attribute group or a base type at this point of a walk. */
+static void xsd_push_table(th_schema *schema, xattr_table *table, th_node *node) {
+    const xattr_table *entered = xsd_attr_table_of(schema, node);
+    if (entered == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        table->failed = 1; /* GCOVR_EXCL_LINE */
+        return;            /* GCOVR_EXCL_LINE */
+    }
+    table->has_uses |= entered->has_uses;
+    const xitem item = {.kind = XSD_ITEM_TABLE, .of.table = entered};
+    xsd_push_item(table, &item);
+}
+
+/* Walks the attributes, wildcards and base step of `scope` into its table. A group ref enters the group's table, and a
+   derivation's own children are walked into the same table. Only a complexType has a base, and an attribute group or a
+   derivation holds attributes and attribute group refs, so from there the walk follows nothing but the group refs the
+   attribute group cycle check covers. */
+static void xsd_collect_items(th_schema *schema, th_node *scope, xattr_table *table) {
     th_tree *tree = schema->tree;
-    /* Only a complexType has a base. An attribute group or a derivation holds attributes and attribute group refs, so
-       from there the walk follows nothing but the refs the attribute group cycle check covers. */
     const xchild_entry *children = xsd_child_entry(schema, scope);
     th_node *content = NULL;
     if (is_schema_el(schema, scope, XSD_NS, "complexType")) { /* the one xsd_type_content picks */
@@ -2198,25 +2244,7 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
         th_node *child = children->attrs[index].node;
         const int kind = children->attrs[index].kind;
         if (kind == XSD_ATTRIBUTE) {
-            xsd_validate_attr_decl(ctx, instance, child, attrs);
-            th_node *eff = child;
-            Py_ssize_t ref_len = 0;
-            const Py_UCS4 *ref = xsd_attr(tree, child, "ref", &ref_len);
-            if (ref != NULL) {
-                const Py_UCS4 *local, *prefix;
-                Py_ssize_t local_len = 0, prefix_len = 0;
-                split_prefix(ref, ref_len, &local, &local_len, &prefix, &prefix_len);
-                /* xsd_compile has already rejected an attribute ref that resolves to nothing */
-                eff = named_find(&schema->attributes, local, local_len);
-            }
-            Py_ssize_t name_len = 0;
-            const Py_UCS4 *name = xsd_attr(tree, eff, "name", &name_len);
-            if (name != NULL) {
-                Py_ssize_t uri_len = 0;
-                const Py_UCS4 *uri = xsd_attr_decl_uri(schema, eff, &uri_len);
-                edecl item = {uri, uri_len, name, name_len, eff};
-                edecl_push(schema, declared, &item);
-            }
+            xsd_collect_attribute(schema, table, child);
         } else if (kind == XSD_ATTRIBUTE_GROUP) {
             Py_ssize_t ref_len = 0;
             const Py_UCS4 *ref = xsd_attr(tree, child, "ref", &ref_len);
@@ -2225,33 +2253,115 @@ static void xsd_collect_attrs(valctx *ctx, th_node *instance, th_node *scope, ed
                 Py_ssize_t local_len = 0, prefix_len = 0;
                 split_prefix(ref, ref_len, &local, &local_len, &prefix, &prefix_len);
                 /* xsd_compile has already rejected an attributeGroup ref that resolves to nothing */
-                xsd_collect_attrs(ctx, instance, named_find(&schema->attr_groups, local, local_len), declared, attrs,
-                                  wilds);
+                xsd_push_table(schema, table, named_find(&schema->attr_groups, local, local_len));
             }
         } else if (kind == XSD_ANY_ATTRIBUTE) {
-            edecl item = {NULL, 0, NULL, 0, child};
-            edecl_push(schema, wilds, &item);
+            const xitem item = {.kind = XSD_ITEM_WILD, .of.decl = child};
+            xsd_push_item(table, &item);
         } else if (child == content) {
-            th_node *derivation = xsd_child(schema, child, XSD_EXTENSION);
-            if (derivation == NULL) {
-                derivation = xsd_child(schema, child, XSD_RESTRICTION);
-            }
+            th_node *derivation = xsd_derivation(schema, child);
             if (derivation != NULL) {
-                Py_ssize_t base_len = 0;
-                const Py_UCS4 *base = xsd_attr(tree, derivation, "base", &base_len);
-                if (base != NULL) {
-                    const qname written = schema_node_entry(schema, derivation)->base;
-                    const Py_UCS4 *local = written.local;
-                    Py_ssize_t local_len = written.local_len;
-                    th_node *base_type = named_find(&schema->complex_types, local, local_len);
-                    if (base_type != NULL) {
-                        xsd_collect_attrs(ctx, instance, base_type, declared, attrs, wilds);
-                    }
+                th_node *base_type = xsd_base_type(schema, derivation);
+                if (base_type != NULL) {
+                    xsd_push_table(schema, table, base_type);
                 }
-                xsd_collect_attrs(ctx, instance, derivation, declared, attrs, wilds);
+                xsd_collect_items(schema, derivation, table);
             }
         }
     }
+}
+
+/* Upper bounds on the items and on the wildcard entries xsd_collect_items pushes for `scope`, read from its child
+   entries alone: each child pushes at most one item, and a derivation's children are counted in place of the
+   derivation. */
+typedef struct {
+    size_t items;
+    size_t wilds;
+} xcount;
+
+static TH_NOINLINE void xsd_count_items(th_schema *schema, th_node *scope, xcount *count) {
+    const xchild_entry *children = xsd_child_entry(schema, scope);
+    th_node *content = NULL;
+    if (is_schema_el(schema, scope, XSD_NS, "complexType")) {
+        content = children->first[XSD_COMPLEX_CONTENT] != NULL ? children->first[XSD_COMPLEX_CONTENT]
+                                                               : children->first[XSD_SIMPLE_CONTENT];
+    }
+    for (size_t index = 0; index < children->attr_count; index++) {
+        th_node *child = children->attrs[index].node;
+        const int kind = children->attrs[index].kind;
+        if (kind == XSD_ATTRIBUTE) {
+            count->items++;
+        } else if (kind == XSD_ANY_ATTRIBUTE || kind == XSD_ATTRIBUTE_GROUP) {
+            count->items++;
+            count->wilds++;
+        } else if (child == content) {
+            th_node *derivation = xsd_derivation(schema, child);
+            if (derivation != NULL) {
+                count->items++;
+                count->wilds++;
+                xsd_count_items(schema, derivation, count);
+            }
+        }
+    }
+}
+
+/* The table of a node with no attribute uses, wildcards or base: shared, since nothing ever writes it. */
+static xattr_table xsd_no_attrs;
+
+/* The table of an attribute group or a complexType, built the first time anything asks for it. Building it enters the
+   tables of the groups and base types it refers to, which are built first. The recursion follows those references,
+   which the cycle checks bound. */
+static TH_NOINLINE const xattr_table *xsd_attr_table_of(th_schema *schema, th_node *node) {
+    xnode *record = xsd_xnode(schema, schema_node_qname(schema, node));
+    if (record->attrs != NULL) {
+        return record->attrs;
+    }
+    xcount count = {0};
+    xsd_count_items(schema, node, &count);
+    if (count.items == 0) {
+        record->attrs = &xsd_no_attrs;
+        return record->attrs;
+    }
+    xattr_table *table = arena_alloc(&schema->mem, sizeof(xattr_table));
+    if (table == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return NULL;     /* GCOVR_EXCL_LINE */
+    }
+    *table = (xattr_table){0};
+    table->items = arena_alloc(&schema->mem, count.items * sizeof(xitem));
+    table->wilds = arena_alloc(&schema->mem, count.wilds * sizeof(size_t));
+    if (table->items == NULL || table->wilds == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return NULL;                                    /* GCOVR_EXCL_LINE */
+    }
+    xsd_collect_items(schema, node, table);
+    if (table->failed) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        return NULL;     /* GCOVR_EXCL_LINE */
+    }
+    record->attrs = table;
+    return table;
+}
+
+/* Gathers the table of every complexType and attribute group, once xsd_check_chains has ruled out the cycles a walk
+   would never leave. Each table is built once and shared by everything that refers to it. */
+static TH_NOINLINE int xsd_cache_attrs(th_schema *schema) {
+    for (Py_ssize_t index = 0; index < schema->attr_groups.len; index++) {
+        xsd_xnode(schema, schema_node_qname(schema, schema->attr_groups.items[index].node))->attrs = NULL;
+    }
+    for (size_t index = 0; index < schema->complex_count; index++) {
+        xnode *record = schema->complex_records[index];
+        if (record->children == XSD_NO_ENTRY || schema->child_entries[record->children].attr_count == 0) {
+            record->attrs = &xsd_no_attrs;
+            continue;
+        }
+        if (xsd_attr_table_of(schema, schema->sqnames[record - schema->xnodes].node) == NULL) { /* GCOVR_EXCL_BR_LINE */
+            return -1;                                                                          /* GCOVR_EXCL_LINE */
+        }
+    }
+    for (Py_ssize_t index = 0; index < schema->attr_groups.len; index++) {
+        if (xsd_attr_table_of(schema, schema->attr_groups.items[index].node) == NULL) { /* GCOVR_EXCL_BR_LINE */
+            return -1;                                                                  /* GCOVR_EXCL_LINE */
+        }
+    }
+    return 0;
 }
 
 /* An attribute an xs:anyAttribute admits without a declaration. A global attribute declaration is in the target
@@ -2281,93 +2391,175 @@ static void xsd_validate_wild_attr(valctx *ctx, th_node *instance, th_node *wild
     }
 }
 
-/* The first wildcard whose namespace constraint admits an attribute in `uri`, in the order the walk collected them. */
-static th_node *xsd_admitting_wild(const th_schema *schema, const edecl_vec *wilds, const Py_UCS4 *uri,
+enum { XSD_NAME_BUFFER = 256 };
+
+/* The first wildcard, in walk order, whose namespace constraint admits an attribute in `uri`. Only the entries that can
+   admit one are visited, so an attribute no wildcard admits costs the same whatever uses the table declares. */
+static th_node *xsd_admitting_wild(const th_schema *schema, const xattr_table *table, const Py_UCS4 *uri,
                                    Py_ssize_t uri_len) {
-    for (Py_ssize_t index = 0; index < wilds->count; index++) {
-        th_node *wild = wilds->items[index].decl;
-        if (xsd_wild_admits(schema, wild, uri, uri_len)) {
-            return wild;
+    for (size_t index = 0; index < table->wild_count; index++) {
+        const xitem *item = &table->items[table->wilds[index]];
+        if (item->kind == XSD_ITEM_TABLE) {
+            th_node *wild = xsd_admitting_wild(schema, item->of.table, uri, uri_len);
+            if (wild != NULL) {
+                return wild;
+            }
+        } else if (xsd_wild_admits(schema, item->of.decl, uri, uri_len)) {
+            return item->of.decl;
         }
     }
     return NULL;
 }
 
-static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *scope, edecl_vec *declared) {
+/* The index of the instance attributes of one element, in document order, built for the validate() call that runs the
+   element's attribute check. Returns NULL on an arena allocation failure. */
+static xattr_scratch *xsd_attr_scratch(th_schema *schema, size_t count) {
+    if (schema->attr_scratch == NULL) {
+        schema->attr_scratch = arena_alloc(&schema->mem, sizeof(xattr_scratch));
+        if (schema->attr_scratch == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return NULL;                    /* GCOVR_EXCL_LINE */
+        }
+        *schema->attr_scratch = (xattr_scratch){0};
+    }
+    xattr_scratch *scratch = schema->attr_scratch;
+    if (count > scratch->item_cap) {
+        size_t capacity, bytes;
+        const int fits = th_grow_cap(count, scratch->item_cap, 8, sizeof(xattr_item), &capacity, &bytes);
+        if (!fits) {     /* GCOVR_EXCL_BR_LINE: allocation size overflow */
+            return NULL; /* GCOVR_EXCL_LINE */
+        }
+        xattr_item *items = arena_alloc(&schema->mem, bytes);
+        if (items == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return NULL;     /* GCOVR_EXCL_LINE */
+        }
+        scratch->items = items;
+        scratch->item_cap = capacity;
+    }
+    size_t slots = 8;
+    while (slots < count * 2) {
+        slots *= 2;
+    }
+    if (slots > scratch->slot_alloc) {
+        size_t *grown = arena_alloc(&schema->mem, slots * sizeof(size_t));
+        if (grown == NULL) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+            return NULL;     /* GCOVR_EXCL_LINE */
+        }
+        scratch->slots = grown;
+        scratch->slot_alloc = slots;
+    }
+    scratch->slot_cap = slots;
+    memset(scratch->slots, 0, slots * sizeof(size_t));
+    return scratch;
+}
+
+static xattr_scratch *xsd_index_attrs(valctx *ctx, th_node *instance) {
+    th_schema *schema = ctx->schema;
     th_tree *inst = ctx->tree;
-    xattr_index attrs = {0};
-    if (xsd_index_attrs(ctx, instance, &attrs) < 0) { /* GCOVR_EXCL_BR_LINE: allocation failure */
-        ctx->failed = 1;                              /* GCOVR_EXCL_LINE: allocation failure */
-        return;                                       /* GCOVR_EXCL_LINE: allocation failure */
+    xattr_scratch *scratch = xsd_attr_scratch(schema, (size_t)instance->attr_count);
+    if (scratch == NULL) { /* GCOVR_EXCL_BR_LINE: arena allocation failure */
+        return NULL;       /* GCOVR_EXCL_LINE: arena allocation failure */
     }
-    edecl_vec wilds = edecl_list(ctx->schema);
-    xsd_collect_attrs(ctx, instance, scope, declared, &attrs, &wilds);
-    named_vec names = {0};
-    if (declared->count >= 32 && instance->attr_count >= 32) {
-        names = ctx->schema->attr_names; /* the buffers of the element indexed before this one */
-        names.len = 0;
-        for (Py_ssize_t index = 0; index < declared->count; index++) {
-            edecl *item = &declared->items[index];
-            /* GCOVR_EXCL_BR_START: arena allocation failure */
-            if (named_push(ctx->schema, &names, item->local, item->local_len, item->decl) < 0) {
-                ctx->failed = 1;  /* GCOVR_EXCL_LINE: arena allocation failure */
-                PyErr_NoMemory(); /* GCOVR_EXCL_LINE: arena allocation failure */
-                return;           /* GCOVR_EXCL_LINE: arena allocation failure */
-            }
-            /* GCOVR_EXCL_BR_STOP */
-        }
-        if (named_index(ctx->schema, &names) < 0) { /* GCOVR_EXCL_BR_LINE: arena allocation failure */
-            ctx->failed = 1;                        /* GCOVR_EXCL_LINE */
-            PyErr_NoMemory();                       /* GCOVR_EXCL_LINE */
-            return;                                 /* GCOVR_EXCL_LINE */
-        }
-        ctx->schema->attr_names = names;
-    }
+    scratch->target_ns = schema->target_ns;
+    scratch->target_ns_len = schema->target_ns_len;
+    const size_t mask = scratch->slot_cap - 1;
     for (Py_ssize_t index = 0; index < instance->attr_count; index++) {
+        Py_ssize_t alen = 0;
+        const char *abytes = th_attr_name(inst, instance->attrs[index].name_atom, &alen);
+        xattr_item *item = &scratch->items[index];
+        item->name = xsd_attr_name(schema, abytes, alen);
+        item->known = 0;
+        size_t slot = (size_t)ns_hash_bytes(item->name.local, item->name.local_len) & mask;
+        while (scratch->slots[slot] != 0) {
+            slot = (slot + 1) & mask;
+        }
+        scratch->slots[slot] = (size_t)index + 1;
+    }
+    return scratch;
+}
+
+/* The first instance attribute a use names, or -1. Every attribute the use names is marked known, since a use claims
+   each of them. Attributes with one name sit in the probe run in document order, so the first is the earliest. */
+static Py_ssize_t xsd_match_use(xattr_scratch *scratch, const xitem *use) {
+    const size_t mask = scratch->slot_cap - 1;
+    const Py_UCS4 *uri = use->qualified ? scratch->target_ns : NULL;
+    const Py_ssize_t uri_len = use->qualified ? scratch->target_ns_len : 0;
+    Py_ssize_t first = -1;
+    for (size_t slot = (size_t)use->hash & mask; scratch->slots[slot] != 0; slot = (slot + 1) & mask) {
+        const size_t at = scratch->slots[slot] - 1;
+        xattr_item *item = &scratch->items[at];
+        if (u_eq_utf8(use->local, use->local_len, item->name.local, item->name.local_len) &&
+            u_eq_u(item->name.uri, item->name.uri_len, uri, uri_len)) {
+            item->known = 1;
+            if (first < 0) {
+                first = (Py_ssize_t)at;
+            }
+        }
+    }
+    return first;
+}
+
+/* Reports the uses of one table and of its bases in walk order, checking each present one against its instance
+   attribute. */
+static void xsd_report_uses(valctx *ctx, th_node *instance, const xattr_table *table, xattr_scratch *scratch,
+                            char *namebuf) {
+    for (size_t index = 0; index < table->item_count; index++) {
+        const xitem *item = &table->items[index];
+        if (item->kind == XSD_ITEM_TABLE) {
+            xsd_report_uses(ctx, instance, item->of.table, scratch, namebuf);
+        } else if (item->kind == XSD_ITEM_USE) {
+            const Py_ssize_t at = xsd_match_use(scratch, item);
+            if (at < 0) {
+                if (item->use == XSD_USE_REQUIRED) {
+                    report(ctx, instance, "structure", "required attribute '%s' is missing",
+                           name_utf8(item->local, item->local_len, namebuf, XSD_NAME_BUFFER));
+                }
+            } else if (item->use == XSD_USE_PROHIBITED) {
+                report(ctx, instance, "structure", "attribute '%s' is prohibited",
+                       name_utf8(item->local, item->local_len, namebuf, XSD_NAME_BUFFER));
+            } else {
+                xsd_validate_attr_value(ctx, instance, item->of.decl, &instance->attrs[at],
+                                        name_utf8(item->local, item->local_len, namebuf, XSD_NAME_BUFFER));
+            }
+        }
+    }
+}
+
+/* Validates an element's attributes against its complexType's chain of attribute tables. The uses are reported in walk
+   order, so a missing, prohibited or mistyped attribute keeps the order the schema declares it in. Last, every instance
+   attribute no use admits is reported, in document order, unless a wildcard admits it. */
+static void xsd_validate_attrs(valctx *ctx, th_node *instance, th_node *ctype) {
+    th_schema *schema = ctx->schema;
+    th_tree *inst = ctx->tree;
+    const xattr_table *table = xsd_attr_table_cached(schema, ctype);
+    if (!table->has_uses && instance->attr_count == 0) {
+        return;
+    }
+    xattr_scratch *scratch = xsd_index_attrs(ctx, instance);
+    if (scratch == NULL) { /* GCOVR_EXCL_BR_LINE: arena allocation failure */
+        ctx->failed = 1;   /* GCOVR_EXCL_LINE: arena allocation failure */
+        PyErr_NoMemory();  /* GCOVR_EXCL_LINE: arena allocation failure */
+        return;            /* GCOVR_EXCL_LINE: arena allocation failure */
+    }
+    char namebuf[XSD_NAME_BUFFER];
+    xsd_report_uses(ctx, instance, table, scratch, namebuf);
+    for (Py_ssize_t index = 0; index < instance->attr_count; index++) {
+        const xattr_item *item = &scratch->items[index];
+        if (item->known) {
+            continue;
+        }
         Py_ssize_t alen = 0;
         const char *abytes = th_attr_name(inst, instance->attrs[index].name_atom, &alen);
         if (is_xmlns_decl(abytes, alen)) {
             continue;
         }
-        const xattr_name qualified = xsd_attr_name(ctx->schema, abytes, alen);
-        if (xsd_attr_exempt(&qualified)) {
+        if (xsd_attr_exempt(&item->name)) {
             continue;
         }
-        int known = 0;
-        if (names.slots != NULL) {
-            uint64_t hash = UINT64_C(1469598103934665603);
-            for (Py_ssize_t byte = 0; byte < qualified.local_len; byte++) {
-                hash ^= (unsigned char)qualified.local[byte];
-                hash *= UINT64_C(1099511628211);
-            }
-            size_t slot = (size_t)hash & (names.slot_cap - 1);
-            while (names.slots[slot] != NULL) {
-                named_node *item = names.slots[slot];
-                Py_ssize_t decl_uri_len = 0;
-                const Py_UCS4 *decl_uri = xsd_attr_decl_uri(ctx->schema, item->node, &decl_uri_len);
-                if (u_eq_utf8(item->name, item->len, qualified.local, qualified.local_len) &&
-                    u_eq_u(qualified.uri, qualified.uri_len, decl_uri, decl_uri_len)) {
-                    known = 1;
-                    break;
-                }
-                slot = (slot + 1) & (names.slot_cap - 1);
-            }
-        }
-        for (Py_ssize_t decl = 0; names.slots == NULL && decl < declared->count; decl++) {
-            const edecl *item = &declared->items[decl];
-            if (u_eq_utf8(item->local, item->local_len, qualified.local, qualified.local_len) &&
-                u_eq_u(qualified.uri, qualified.uri_len, item->uri, item->uri_len)) {
-                known = 1;
-                break;
-            }
-        }
-        if (!known) {
-            th_node *wild = xsd_admitting_wild(ctx->schema, &wilds, qualified.uri, qualified.uri_len);
-            if (wild == NULL) {
-                report(ctx, instance, "structure", "attribute '%s' is not declared", abytes);
-            } else {
-                xsd_validate_wild_attr(ctx, instance, wild, &instance->attrs[index], abytes, &qualified);
-            }
+        th_node *wild = xsd_admitting_wild(schema, table, item->name.uri, item->name.uri_len);
+        if (wild == NULL) {
+            report(ctx, instance, "structure", "attribute '%s' is not declared", abytes);
+        } else {
+            xsd_validate_wild_attr(ctx, instance, wild, &instance->attrs[index], abytes, &item->name);
         }
     }
 }
@@ -2505,8 +2697,7 @@ static th_node *xsd_wild_decl(valctx *ctx, th_node *child, th_node *wild) {
 static void xsd_validate_complex(valctx *ctx, th_node *instance, th_node *ctype, xsd_frame *frame) {
     th_schema *schema = ctx->schema;
     th_tree *inst = ctx->tree;
-    edecl_vec declared = edecl_list(schema);
-    xsd_validate_attrs(ctx, instance, ctype, &declared);
+    xsd_validate_attrs(ctx, instance, ctype);
 
     th_node *simple_content = xsd_child(schema, ctype, XSD_SIMPLE_CONTENT);
     if (simple_content != NULL) {
@@ -2907,6 +3098,10 @@ static int xsd_compile(th_schema *schema) {
     if (xsd_check_varieties(schema) < 0) {
         return 0;
     }
+    if (xsd_cache_attrs(schema) < 0) { /* GCOVR_EXCL_BR_LINE: arena OOM is unforceable */
+        PyErr_NoMemory();              /* GCOVR_EXCL_LINE */
+        return 0;                      /* GCOVR_EXCL_LINE */
+    }
     if (schema->all_count > 1) {
         qsort(schema->all_entries, schema->all_count, sizeof(xall_entry), xsd_all_order);
     }
@@ -2995,7 +3190,7 @@ static named_vec *xsd_chain_vec(th_schema *schema, int kind) {
 static const char *xsd_chain_kind(int kind);
 
 /* Validation follows these refs by C recursion (xsd_collect_edecls, xsd_match_once, xsd_effective_model,
-   xsd_collect_attrs). Well above any real schema (xmlschema already fails below 200 hops) and far below the smallest
+   xsd_collect_uses). Well above any real schema (xmlschema already fails below 200 hops) and far below the smallest
    supported thread stack. */
 #define TH_XSD_MAX_REF_DEPTH TH_DEPTH_LIMIT(100)
 
